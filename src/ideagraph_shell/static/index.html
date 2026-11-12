@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Граф идеи</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <span class="logo">ГРАФ ИДЕИ</span>
+  <span id="projectTitle" class="project-title"></span>
+  <nav class="tabs" id="tabs"></nav>
+  <span class="spacer"></span>
+  <span id="saveState" class="hint"></span>
+  <span id="zoomLabel" class="hint">100%</span>
+  <button id="fitBtn" title="Вписать граф в окно (двойной щелчок по фону)">Вписать</button>
+  <button id="undoBtn" title="Отменить последнее изменение графа">↶ Отменить</button>
+  <button id="openBtn" title="Открыть другую идею или создать новую">Идеи…</button>
+</header>
+<main>
+  <section class="tab" id="tab-graph">
+    <div id="canvas"></div>
+    <aside id="inspector" class="inspector" hidden></aside>
+    <aside class="dock" id="dock"></aside>
+  </section>
+  <section class="tab" id="tab-settings"><div class="page" id="settingsPage"></div></section>
+  <section class="tab on" id="tab-welcome"><div class="page" id="welcomePage"></div></section>
+</main>
+<div id="toast" class="toast" hidden></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
