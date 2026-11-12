@@ -4,16 +4,16 @@
 Запускает агентов (Claude Code, OpenCode) и даёт им инструменты графа через MCP.
 
 ```
-ideagraph                 # открыть оболочку в браузере
-ideagraph папка-идеи      # сразу открыть идею
-ideagraph --packages      # какие пакеты установлены
-ideagraph --port 8770     # другой порт
+idea-graph                 # открыть оболочку в браузере
+idea-graph папка-идеи      # сразу открыть идею
+idea-graph --packages      # какие пакеты установлены
+idea-graph --port 8770     # другой порт
 ```
 
 Главное внутри: `runtime.py` — ходы пакета, вопросы и ответы, решатель, предохранитель;
 `agents.py` — запуск агентов; `tools.py` — инструменты агента и общие правила;
 `packages.py` — манифест пакета; `static/js/canvas.js` — холст.
-Настройки хранятся в `~/.ideagraph/settings.json` (папку можно сменить переменной `IDEAGRAPH_HOME`).
+Настройки хранятся в `~/.idea-graph/settings.json` (папку можно сменить переменной `IDEA_GRAPH_HOME`).
 
 ## Установка
 
@@ -21,7 +21,7 @@ ideagraph --port 8770     # другой порт
 pip install -e .
 ```
 
-Нужен `ideagraph-core`.
+Нужен `idea-graph-core`.
 
 ## Тесты
 

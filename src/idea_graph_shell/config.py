@@ -1,6 +1,6 @@
 """Настройки оболочки: какой агент и какая модель у каждого пакета, решатели, автоматика.
 
-Лежат в домашней папке пользователя (``~/.ideagraph/settings.json``) и общие для всех идей.
+Лежат в домашней папке пользователя (``~/.idea-graph/settings.json``) и общие для всех идей.
 Сам граф идеи хранится в папке идеи, оболочка помнит только список недавних папок.
 """
 
@@ -30,7 +30,7 @@ DEFAULTS = {
 
 
 def home() -> Path:
-    return Path(os.environ.get("IDEAGRAPH_HOME") or Path.home() / ".ideagraph")
+    return Path(os.environ.get("IDEA_GRAPH_HOME") or Path.home() / ".idea-graph")
 
 
 def _merge(base: dict, extra: dict) -> dict:

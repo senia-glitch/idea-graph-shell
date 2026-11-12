@@ -4,11 +4,11 @@ import time
 
 import pytest
 
-from ideagraph_core import Store
-from ideagraph_shell.agents import Adapter, Adapters, TurnResult
-from ideagraph_shell.config import Settings
-from ideagraph_shell.packages import Registry
-from ideagraph_shell.runtime import GraphError, Project, ShellError
+from idea_graph_core import Store
+from idea_graph_shell.agents import Adapter, Adapters, TurnResult
+from idea_graph_shell.config import Settings
+from idea_graph_shell.packages import Registry
+from idea_graph_shell.runtime import GraphError, Project, ShellError
 
 
 class ScriptAdapter(Adapter):

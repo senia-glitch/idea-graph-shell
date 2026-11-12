@@ -20,7 +20,7 @@ import threading
 import time
 from pathlib import Path
 
-from ideagraph_core import HUMAN, GraphError, Store, author_name, views
+from idea_graph_core import HUMAN, GraphError, Store, author_name, views
 
 from .agents import Adapters, TurnRequest, TurnResult
 from .config import Settings
@@ -442,7 +442,7 @@ class Project:
 
         request = TurnRequest(
             workdir=workdir, system_text=system_text, note=note,
-            env={"IDEAGRAPH_URL": self.base_url, "IDEAGRAPH_TOKEN": token},
+            env={"IDEA_GRAPH_URL": self.base_url, "IDEA_GRAPH_TOKEN": token},
             session_id=session, model=slot.get("model") or "", effort=slot.get("effort") or "",
             web_search=web, on_process=remember, extra={"token": token, "project": self},
         )

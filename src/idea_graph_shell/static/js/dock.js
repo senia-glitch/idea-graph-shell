@@ -66,7 +66,7 @@ export function renderDock() {
     const run = runOf(p.id), status = run?.status || "idle";
     return `<button class="pkg${p.id === S.pkg ? " on" : ""}" data-pkg="${p.id}" title="${esc(p.description)}">
       <span class="dot s-${status}"></span>${esc(p.name)}</button>`;
-  }).join("") || '<div class="hint">Пакеты не установлены. Поставьте, например, ideagraph-clarify и перезапустите оболочку.</div>');
+  }).join("") || '<div class="hint">Пакеты не установлены. Поставьте, например, idea-graph-clarify и перезапустите оболочку.</div>');
   renderControls();
   const questions = openQuestions().length;
   const decided = decisionCards().filter((c) => c.decision.by !== "human").length;

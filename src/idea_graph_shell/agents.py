@@ -1,7 +1,7 @@
 """Запуск агентов: один ход — один запуск командной строки агента с продолжением сессии.
 
 Оболочка — единственная, кто запускает агентов. Она даёт агенту только свои инструменты
-(через MCP-сервер ``ideagraph_shell.mcp_proxy``) и текст скилла как системную инструкцию.
+(через MCP-сервер ``idea_graph_shell.mcp_proxy``) и текст скилла как системную инструкцию.
 Файлы, терминал и остальное агенту закрыто; веб-поиск открывается, если пакет заявил его.
 
 Способ запуска спрятан за адаптером: постоянно живущий процесс можно будет добавить,
@@ -21,7 +21,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SERVER_NAME = "ideagraph"
+SERVER_NAME = "idea-graph"
 TURN_TIMEOUT = 900
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
@@ -48,7 +48,7 @@ class TurnResult:
 
 @dataclass
 class TurnRequest:
-    workdir: Path                 # своя папка агента внутри .ideagraph: там нет чужих инструкций
+    workdir: Path                 # своя папка агента внутри .idea-graph: там нет чужих инструкций
     system_text: str              # скилл пакета + общие правила оболочки
     note: str                     # вводные этого хода
     env: dict                     # адрес и ключ оболочки для MCP-сервера
@@ -71,7 +71,7 @@ def _json_lines(text: str):
 
 
 def _server_command() -> list[str]:
-    return [sys.executable, "-m", "ideagraph_shell.mcp_proxy"]
+    return [sys.executable, "-m", "idea_graph_shell.mcp_proxy"]
 
 
 def _execute(argv: list[str], request: TurnRequest, stdin_text: str | None, env: dict,
@@ -219,7 +219,7 @@ class OpenCodeAdapter(Adapter):
     exe = "opencode"
     # Вводные хода агент забирает инструментом: длинный текст с переводами строк нельзя
     # надёжно передать аргументом через opencode.cmd в Windows.
-    PROMPT = "New turn. Call the ideagraph tool turn_info and do exactly what it returns."
+    PROMPT = "New turn. Call the idea-graph tool turn_info and do exactly what it returns."
 
     def models(self):
         exe = self.found()

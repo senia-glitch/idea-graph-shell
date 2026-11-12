@@ -2,7 +2,7 @@
 
 from conftest import wait_for
 
-from ideagraph_core import ACCEPTED, HUMAN
+from idea_graph_core import ACCEPTED, HUMAN
 
 
 def clarify_script(note, call, request):
@@ -174,7 +174,7 @@ def test_state_survives_reopen(make, tmp_path):
     project = make(clarify_script)
     project.start("clarify")
     wait_for(lambda: project.runs.get("clarify"), ("asking",))
-    from ideagraph_shell.runtime import Project
+    from idea_graph_shell.runtime import Project
 
     again = Project(project.folder, project.settings, project.registry, project.adapters)
     assert again.runs["clarify"].status == "asking"
@@ -201,7 +201,7 @@ def test_failed_turn_keeps_its_inputs(make):
     def flaky(request):
         if state["fail"]:
             state["fail"] = False
-            from ideagraph_shell.agents import TurnResult
+            from idea_graph_shell.agents import TurnResult
             return TurnResult(error="You've hit your 5-hour limit")
         return original(request)
 

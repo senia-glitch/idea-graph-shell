@@ -4,7 +4,7 @@
 пересылает вызовы инструментов оболочке по HTTP. Список инструментов тоже даёт оболочка:
 у пакета-скилла и у решателя он разный.
 
-Адрес и ключ приходят в переменных окружения ``IDEAGRAPH_URL`` и ``IDEAGRAPH_TOKEN``.
+Адрес и ключ приходят в переменных окружения ``IDEA_GRAPH_URL`` и ``IDEA_GRAPH_TOKEN``.
 """
 
 from __future__ import annotations
@@ -19,12 +19,12 @@ PROTOCOL = "2024-11-05"
 
 
 def _call(path: str, payload: dict | None = None) -> dict:
-    url = os.environ.get("IDEAGRAPH_URL", "").rstrip("/") + path
+    url = os.environ.get("IDEA_GRAPH_URL", "").rstrip("/") + path
     data = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         url, data=data, method="POST",
         headers={"Content-Type": "application/json",
-                 "X-Ideagraph-Token": os.environ.get("IDEAGRAPH_TOKEN", "")},
+                 "X-Idea-Graph-Token": os.environ.get("IDEA_GRAPH_TOKEN", "")},
     )
     try:
         with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310 — локальный адрес оболочки
@@ -46,7 +46,7 @@ def handle(message: dict) -> dict | None:
     if method == "initialize":
         version = (message.get("params") or {}).get("protocolVersion") or PROTOCOL
         result = {"protocolVersion": version, "capabilities": {"tools": {}},
-                  "serverInfo": {"name": "ideagraph", "version": "0.1.0"}}
+                  "serverInfo": {"name": "idea-graph", "version": "0.1.0"}}
     elif method == "ping":
         result = {}
     elif method == "tools/list":

@@ -7,11 +7,11 @@ import urllib.request
 
 import pytest
 
-from ideagraph_shell import mcp_proxy
-from ideagraph_shell.agents import Adapters
-from ideagraph_shell.config import Settings
-from ideagraph_shell.packages import Registry
-from ideagraph_shell.server import App, make_server
+from idea_graph_shell import mcp_proxy
+from idea_graph_shell.agents import Adapters
+from idea_graph_shell.config import Settings
+from idea_graph_shell.packages import Registry
+from idea_graph_shell.server import App, make_server
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def http(app, path, data=None, headers=None):
     request = urllib.request.Request(
         app.base_url + path, data=None if data is None else json.dumps(data).encode("utf-8"),
         method="GET" if data is None else "POST",
-        headers={"Content-Type": "application/json", "X-Ideagraph": "1", **(headers or {})},
+        headers={"Content-Type": "application/json", "X-Idea-Graph": "1", **(headers or {})},
     )
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
@@ -64,7 +64,7 @@ def test_project_graph_history_undo(served, tmp_path):
 
 def test_foreign_site_cannot_post(served, tmp_path):
     code, error = http(served, "/api/project/create", {"folder": str(tmp_path / "x"), "title": "t"},
-                       headers={"X-Ideagraph": "0"})
+                       headers={"X-Idea-Graph": "0"})
     assert code == 403 and error["error"] == "forbidden"
 
 
@@ -83,13 +83,13 @@ def test_static_and_settings(served):
 def test_mcp_bridge(served, tmp_path, monkeypatch):
     http(served, "/api/project/create", {"folder": str(tmp_path / "idea"), "title": "Идея"})
     project = served.project
-    from ideagraph_shell.runtime import Run
+    from idea_graph_shell.runtime import Run
 
     run = project.runs["clarify"] = Run("clarify")
     run.note = "вводные хода"
     project.tokens["tok"] = {"kind": "package", "run": run, "manifest": project.registry.get("clarify")}
-    monkeypatch.setenv("IDEAGRAPH_URL", served.base_url)
-    monkeypatch.setenv("IDEAGRAPH_TOKEN", "tok")
+    monkeypatch.setenv("IDEA_GRAPH_URL", served.base_url)
+    monkeypatch.setenv("IDEA_GRAPH_TOKEN", "tok")
 
     init = mcp_proxy.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}})
     assert init["result"]["protocolVersion"] == "2025-03-26"
@@ -107,5 +107,5 @@ def test_mcp_bridge(served, tmp_path, monkeypatch):
     assert done["isError"] is False and project.store.cards["c2"]["author"] == "package:clarify"
     bad = call("graph_apply", ops=[{"op": "delete_card", "id": "c1"}])
     assert bad["isError"] is True and "Корневую" in bad["content"][0]["text"]
-    monkeypatch.setenv("IDEAGRAPH_TOKEN", "чужой")
+    monkeypatch.setenv("IDEA_GRAPH_TOKEN", "чужой")
     assert call("graph_read", mode="outline")["isError"] is True

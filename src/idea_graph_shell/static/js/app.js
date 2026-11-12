@@ -54,7 +54,7 @@ function renderWelcome() {
   const recent = S.boot.settings.recent || [];
   $("welcomePage").innerHTML = `
     <h2>Новая идея</h2>
-    <p class="hint">Одна идея — одна папка. Граф хранится в ней (подпапка .ideagraph), поэтому его можно вести в git вместе с остальным.</p>
+    <p class="hint">Одна идея — одна папка. Граф хранится в ней (подпапка .idea-graph), поэтому его можно вести в git вместе с остальным.</p>
     <form id="createForm" class="form-grid one">
       <label>Идея одной строкой<input name="title" required maxlength="200" placeholder="Например: сервис записи к врачу без звонков"></label>
       <label>Подробнее, если есть что добавить<textarea name="body" rows="4" placeholder="Сырой текст идеи как есть"></textarea></label>

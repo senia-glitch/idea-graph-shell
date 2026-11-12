@@ -24,13 +24,13 @@ export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, {d
 export async function api(path, data) {
   const init = data === undefined
     ? {}
-    : {method: "POST", headers: {"Content-Type": "application/json", "X-Ideagraph": "1"}, body: JSON.stringify(data)};
+    : {method: "POST", headers: {"Content-Type": "application/json", "X-Idea-Graph": "1"}, body: JSON.stringify(data)};
   let response, body;
   try {
     response = await fetch(path, init);
     body = await response.json();
   } catch (error) {
-    throw new Error("Оболочка не отвечает. Проверьте, что команда ideagraph ещё запущена.");
+    throw new Error("Оболочка не отвечает. Проверьте, что команда idea-graph ещё запущена.");
   }
   if (!response.ok) {
     const failure = new Error(body.message || "Ошибка запроса");

@@ -1,7 +1,7 @@
 """Как оболочка узнаёт об установленных пакетах.
 
 Пакет ставится через pip в то же окружение и объявляет точку входа в группе
-``ideagraph.packages``. Точка входа — функция без аргументов, которая возвращает манифест
+``idea_graph.packages``. Точка входа — функция без аргументов, которая возвращает манифест
 (обычный словарь). Импортировать оболочку пакету не нужно.
 
 Поля манифеста
@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from importlib import metadata
 
-GROUP = "ideagraph.packages"
+GROUP = "idea_graph.packages"
 KINDS = ("agent", "code", "decider", "view")
 PUBLIC = ("id", "name", "description", "kind", "reads", "writes", "asks", "web_search",
           "model_level", "outcomes", "tab", "version", "order")

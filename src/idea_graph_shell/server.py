@@ -1,7 +1,7 @@
 """Локальный веб-сервер оболочки: интерфейс для человека и мост для инструментов агента.
 
 Слушает только 127.0.0.1. Запросы человека, которые что-то меняют, обязаны нести заголовок
-``X-Ideagraph`` (его не может поставить чужой сайт), запросы агента — ключ хода.
+``X-Idea-Graph`` (его не может поставить чужой сайт), запросы агента — ключ хода.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from ideagraph_core import GraphError, Store, author_name, views
+from idea_graph_core import GraphError, Store, author_name, views
 
 from .agents import Adapters
 from .config import Settings
@@ -185,7 +185,7 @@ class App:
 
 class Handler(BaseHTTPRequestHandler):
     app: App
-    server_version = "ideagraph"
+    server_version = "idea-graph"
 
     def log_message(self, *_args):   # тишина в консоли
         return
@@ -273,9 +273,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"forbidden", "text/plain")
         path = urlparse(self.path).path
         if path.startswith("/agent/"):
-            token = self.headers.get("X-Ideagraph-Token") or ""
+            token = self.headers.get("X-Idea-Graph-Token") or ""
             return self._run(lambda: self.app.agent_call(token, path, self._body()))
-        if self.headers.get("X-Ideagraph") != "1":
+        if self.headers.get("X-Idea-Graph") != "1":
             self._drain()
             return self._json({"error": "forbidden", "message": "Запрос не из интерфейса оболочки"}, 403)
         if path.startswith("/pkg/"):

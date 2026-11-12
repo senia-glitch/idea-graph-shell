@@ -3,24 +3,24 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ideagraph-shell"
+name = "idea-graph-shell"
 version = "0.1.0"
 description = "Оболочка графа идеи: холст, чат, настройки агентов, запуск пакетов"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["ideagraph-core @ git+https://github.com/senia-glitch/idea-graph-core.git"]
+dependencies = ["idea-graph-core @ git+https://github.com/senia-glitch/idea-graph-core.git"]
 
 [project.optional-dependencies]
 test = ["pytest"]
 
 [project.scripts]
-ideagraph = "ideagraph_shell.cli:main"
+idea-graph = "idea_graph_shell.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-ideagraph_shell = ["static/*", "static/**/*"]
+idea_graph_shell = ["static/*", "static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
