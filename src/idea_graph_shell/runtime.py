@@ -1,4 +1,4 @@
-"""Открытая идея: граф, работа пакетов, вопросы и ответы, чат.
+"""Открытый проект: граф, работа пакетов, вопросы и ответы, чат.
 
 Главный цикл работы пакета-скилла (:meth:`Project._work`):
 
@@ -201,7 +201,7 @@ class Project:
         with self.lock:
             return {
                 "folder": str(self.folder),
-                "title": self.store.cards[self.store.root_id]["title"],
+                "title": self.store.title or self.folder.name,
                 "revision": self.store.revision,
                 "seq": self.seq,
                 "runs": {key: run.public() for key, run in self.runs.items()},
@@ -516,7 +516,7 @@ class Project:
     def important(self, question: dict) -> bool:
         """Важный ли вопрос: считается по графу, без модели."""
         cards = {c for c in question.get("cards", []) + question.get("revisits", []) if c in self.store.cards}
-        if self.store.root_id in cards or len(cards) >= 3:
+        if len(cards) >= 3:
             return True
         limit = int(self.settings.data["automation"].get("important_dependents") or 3)
         return any(len(views.dependents(self.store, c)) >= limit for c in cards)

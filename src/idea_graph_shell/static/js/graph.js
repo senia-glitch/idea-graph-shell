@@ -1,7 +1,7 @@
 /* Экран «Граф»: карточки на холсте и панель свойств выбранной карточки или связи. */
 
 import {createCanvas} from "./canvas.js";
-import {$, DETAIL, ROOT, S, STATUS, act, api, authorName, emit, esc, on, promptText, toast, when} from "./core.js";
+import {$, DETAIL, S, STATUS, act, api, authorName, emit, esc, on, promptText, toast, when} from "./core.js";
 
 let canvas;
 let layoutLoaded = false;
@@ -9,7 +9,8 @@ let saveTimer = 0;
 const G = {cards: new Map(), edges: [], parents: new Map(), children: new Map()};
 
 const KIND_COLORS = {
-  "идея": "#e8833a", "ветка": "#5aa0ff", "решение": "#7fc97f", "граница": "#ff5d5d",
+  "домен": "#e8833a", "сценарий": "#5aa0ff", "проблема": "#ff8fa3", "результат": "#7fc97f",
+  "ветка": "#5aa0ff", "решение": "#7fc97f", "граница": "#ff5d5d",
   "открытый вопрос": "#e8c33a", "замечание": "#ff8fa3", "требование": "#bb9af7", "факт": "#6fd3c7",
   "конкурент": "#c9a86a",
 };
@@ -24,7 +25,7 @@ const SERVICE_KINDS = ["открытый вопрос", "замечание"];  
 const EDGE_COLORS = {"противоречит": "#ff5d5d", "о карточке": "#ff8fa3", "подтверждает": "#7fc97f", "опровергает": "#ff5d5d"};
 
 export function graphIndex() { return G; }
-export function kinds() { return [...new Set([...G.cards.values()].map((c) => c.kind).filter((k) => k !== ROOT))]; }
+export function kinds() { return [...new Set([...G.cards.values()].map((c) => c.kind))]; }
 export function dependents(id) {
   const incoming = new Map();
   for (const e of G.edges) { if (!incoming.has(e.to)) incoming.set(e.to, []); incoming.get(e.to).push(e.from); }
@@ -45,7 +46,6 @@ function decisionBadges(card) {
 }
 
 function renderNode(card) {
-  const root = card.kind === ROOT;
   const agent = card.author !== "human";
   return `<div class="hd" style="--c:${kindColor(card.kind)}"><span class="grip" title="Перетащить карточку вместе с её веткой">⠿</span>` +
     `<span class="chip">${esc(card.kind)}</span>` +
@@ -55,7 +55,7 @@ function renderNode(card) {
     '<span class="link-handle" title="Потяните к другой карточке, чтобы связать">○</span></div>' +
     (card.body ? `<div class="body">${esc(card.body)}</div>` : "") +
     decisionBadges(card) +
-    (card.status === "proposed" && !root
+    (card.status === "proposed"
       ? '<div class="row-actions">' + (SERVICE_KINDS.includes(card.kind) ? "" : '<button data-act="accept" title="Принять карточку">✓ Принять</button>') +
         '<button data-act="delete" class="danger" title="Удалить карточку">✕ Удалить</button></div>'
       : "") +
@@ -97,7 +97,7 @@ export function initGraph() {
   canvas = createCanvas($("canvas"), {
     renderNode,
     renderPending,
-    nodeClass: (card) => (card.kind === ROOT ? "k-root " : "") + (card.status === "proposed" ? "planned " : ""),
+    nodeClass: (card) => (card.status === "proposed" ? "planned " : ""),
     // новая карточка встаёт рядом с родителем, а если родителя нет — рядом с тем, на что она ссылается
     parentsOf: (id) => G.parents.get(id) || G.edges.filter((e) => e.from === id).map((e) => e.to),
     childrenOf: (id) => G.children.get(id) || [],
@@ -124,9 +124,18 @@ export function initGraph() {
     }),
   });
   $("fitBtn").onclick = () => canvas.fit();
+  $("addDomainBtn").onclick = () => act(async () => {
+    const title = await promptText("Кто испытывает проблему? Назовите конкретную группу людей (домен)", "");
+    if (!title) return;
+    const result = await api("/api/ops", {ops: [{op: "add_card", kind: "домен", title: title.slice(0, 200),
+      body: title.length > 200 ? title : ""}]});
+    await loadGraph();
+    canvas.select(result.ids[0]);
+    renderInspector();
+  });
   $("undoBtn").onclick = () => act(async () => {
     const history = await api("/api/history");
-    const last = history.entries.find((e) => !e.undone && !e.undo_of && e.rev > 1);
+    const last = history.entries.find((e) => !e.undone && !e.undo_of);
     if (!last) return toast("Отменять нечего");
     await api("/api/undo", {rev: last.rev});
     await loadGraph();
@@ -155,8 +164,8 @@ export async function loadGraph() {
   const fresh = before.size ? data.cards.filter((c) => !before.has(c.id) && c.author !== "human").map((c) => c.id) : [];
   canvas.markFresh(fresh);
   if (fresh.length) setTimeout(() => { canvas.markFresh([]); canvas.draw(); }, 4000);
-  // корень первым, дальше по порядку появления: так новые карточки встают рядом с родителем
-  const order = [...data.cards].sort((a, b) => (a.kind === ROOT ? -1 : b.kind === ROOT ? 1 : Number(a.id.slice(1)) - Number(b.id.slice(1))));
+  // по порядку появления: так новые карточки встают рядом с родителем
+  const order = [...data.cards].sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
   canvas.setData(order, data.edges);
   renderInspector();
   emit("graph");
@@ -202,7 +211,6 @@ function renderInspector() {
   const active = document.activeElement;
   if (box.dataset.card === card.id && box.contains(active) && ["INPUT", "TEXTAREA"].includes(active.tagName)) return;  // не сбиваем ввод
   box.dataset.card = card.id;
-  const root = card.kind === ROOT;
   const links = G.edges.filter((e) => e.from === card.id || e.to === card.id).map((e) => {
     const out = e.from === card.id, other = G.cards.get(out ? e.to : e.from);
     return `<div class="link-row" data-edge="${e.id}"><span class="dir">${out ? "→" : "←"}</span>
@@ -212,18 +220,18 @@ function renderInspector() {
   }).join("");
   box.hidden = false;
   box.innerHTML = `<div class="insp-head"><b>Карточка ${card.id}</b><span class="spacer"></span><button class="icon" id="inspClose" title="Закрыть">×</button></div>
-    <label>Вид<input id="fKind" value="${esc(card.kind)}" list="kindList2" ${root ? "disabled" : ""}></label>
+    <label>Вид<input id="fKind" value="${esc(card.kind)}" list="kindList2"></label>
     <datalist id="kindList2">${kinds().map((k) => `<option value="${esc(k)}">`).join("")}</datalist>
     <label>Заголовок<input id="fTitle" value="${esc(card.title)}" maxlength="200"></label>
     <label>Текст<textarea id="fBody" rows="7">${esc(card.body || "")}</textarea></label>
     <div class="seg" id="fStatus">${Object.entries(STATUS).map(([key, name]) =>
-      `<button class="${card.status === key ? "on" : ""}" data-status="${key}" ${root ? "disabled" : ""}>${name}</button>`).join("")}</div>
+      `<button class="${card.status === key ? "on" : ""}" data-status="${key}">${name}</button>`).join("")}</div>
     <div class="hint">Автор: ${esc(authorName(card.author))} · зависит карточек: ${dependents(card.id).size}</div>
     ${decisionBlock(card)}
     <div class="lbl">Связи</div>
     <datalist id="edgeKinds">${[...new Set([DETAIL, ...G.edges.map((e) => e.kind)])].map((k) => `<option value="${esc(k)}">`).join("")}</datalist>
     ${links || '<div class="hint">Связей нет. Потяните кружок ○ на карточке к другой карточке.</div>'}
-    <div class="row-actions"><button id="inspChild">+ Потомок</button>${root ? "" : '<button id="inspDelete" class="danger">Удалить карточку</button>'}</div>
+    <div class="row-actions"><button id="inspChild">+ Потомок</button><button id="inspDelete" class="danger">Удалить карточку</button></div>
     <details id="cardHistory"><summary>История карточки</summary><div class="hint">…</div></details>`;
   const save = (field, id) => $(id).addEventListener("change", () => {
     const value = $(id).value;
@@ -236,7 +244,7 @@ function renderInspector() {
     if (status && status !== card.status) act(() => ops([{op: "update_card", id: card.id, status}]));
   };
   $("inspChild").onclick = () => canvas.startPending(card.id);
-  if (!root) $("inspDelete").onclick = () => removeCard(card.id);
+  $("inspDelete").onclick = () => removeCard(card.id);
   box.querySelectorAll(".link-row").forEach((row) => {
     const id = row.dataset.edge;
     row.querySelector(".edge-kind").addEventListener("change", (e) => act(() => ops([{op: "update_edge", id, kind: e.target.value}])));

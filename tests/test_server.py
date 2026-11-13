@@ -40,12 +40,20 @@ def http(app, path, data=None, headers=None):
         return error.code, json.loads(error.read().decode("utf-8"))
 
 
+def create_project(served, tmp_path, title="Запись к врачу"):
+    return http(served, "/api/project/create", {"title": title, "parent": str(tmp_path / "root")})
+
+
 def test_project_graph_history_undo(served, tmp_path):
-    assert http(served, "/api/boot")[1]["project"] is None
+    boot = http(served, "/api/boot")[1]
+    assert boot["project"] is None and boot["projects"] == []
     assert http(served, "/api/graph")[0] == 400
-    code, state = http(served, "/api/project/create",
-                       {"folder": str(tmp_path / "idea"), "title": "Запись к врачу", "body": "без звонков"})
-    assert code == 200 and state["title"] == "Запись к врачу" and state["revision"] == 1
+    code, state = create_project(served, tmp_path)
+    assert code == 200 and state["title"] == "Запись к врачу" and state["revision"] == 0
+    assert state["folder"] == str((tmp_path / "root" / "Запись к врачу").resolve()) or state["folder"].endswith("Запись к врачу")
+    assert http(served, "/api/graph")[1]["cards"] == []                 # граф начинается пустым, без корня
+    code, result = http(served, "/api/ops", {"ops": [{"op": "add_card", "kind": "домен", "title": "Пациенты частных клиник"}]})
+    assert code == 200 and result["ids"] == ["c1"]
     code, result = http(served, "/api/ops", {"ops": [{"op": "add_card", "kind": "ветка", "title": "Функции", "parent": "c1"}]})
     assert code == 200 and result["ids"] == ["c2"]
     http(served, "/api/layout", {"positions": {"c2": {"x": 400, "y": 80}}})
@@ -57,13 +65,29 @@ def test_project_graph_history_undo(served, tmp_path):
     assert http(served, "/api/undo", {"rev": 3})[0] == 200
     assert len(http(served, "/api/graph")[1]["cards"]) == 2
     assert http(served, "/api/history")[1]["deleted"] == []
-    code, error = http(served, "/api/ops", {"ops": [{"op": "delete_card", "id": "c1"}]})
-    assert code == 400 and error["error"] == "root_rule"
-    assert served.settings.data["recent"] == [str((tmp_path / "idea").resolve())]
+    code, _ = http(served, "/api/ops", {"ops": [{"op": "delete_card", "id": "c1"}]})
+    assert code == 200                                                    # корня нет: удалить можно любую карточку
+
+
+def test_projects_root_listing_and_creation(served, tmp_path):
+    root = tmp_path / "all"
+    http(served, "/api/settings", {"projects_root": str(root)})
+    assert http(served, "/api/boot")[1]["projects_root"] == str(root)
+    assert http(served, "/api/boot")[1]["projects"] == []
+    code, state = http(served, "/api/project/create", {"title": "Первый: проект?"})      # в корневой папке из настроек
+    assert code == 200 and state["title"] == "Первый: проект?" and (root / "Первый проект").is_dir()
+    other = tmp_path / "elsewhere"
+    code, _ = http(served, "/api/project/create", {"title": "Второй", "parent": str(other)})   # переопределение папки
+    assert code == 200 and (other / "Второй").is_dir()
+    projects = http(served, "/api/boot")[1]["projects"]
+    assert [p["title"] for p in projects] == ["Первый: проект?"]                          # список — только корневая папка
+    assert http(served, "/api/project/create", {"title": "Первый: проект?"})[1]["error"] == "already_exists"
+    assert http(served, "/api/project/create", {"title": "  "})[1]["error"] == "invalid_input"
+    assert http(served, "/api/project/open", {"folder": projects[0]["folder"]})[0] == 200
 
 
 def test_foreign_site_cannot_post(served, tmp_path):
-    code, error = http(served, "/api/project/create", {"folder": str(tmp_path / "x"), "title": "t"},
+    code, error = http(served, "/api/project/create", {"title": "t", "parent": str(tmp_path / "x")},
                        headers={"X-Idea-Graph": "0"})
     assert code == 403 and error["error"] == "forbidden"
 
@@ -81,7 +105,8 @@ def test_static_and_settings(served):
 
 
 def test_mcp_bridge(served, tmp_path, monkeypatch):
-    http(served, "/api/project/create", {"folder": str(tmp_path / "idea"), "title": "Идея"})
+    create_project(served, tmp_path, "Идея")
+    served.project.store.apply([{"op": "add_card", "kind": "домен", "title": "Пациенты"}], "human")
     project = served.project
     from idea_graph_shell.runtime import Run
 
@@ -102,21 +127,10 @@ def test_mcp_bridge(served, tmp_path, monkeypatch):
                                  "params": {"name": name, "arguments": args}})["result"]
 
     assert call("turn_info")["content"][0]["text"] == "вводные хода"
-    assert "[c1] ИДЕЯ · Идея" in call("graph_read", mode="outline")["content"][0]["text"]
+    assert "[c1] домен · Пациенты" in call("graph_read", mode="outline")["content"][0]["text"]
     done = call("graph_apply", ops=[{"op": "add_card", "kind": "ветка", "title": "Функции", "parent": "c1"}])
     assert done["isError"] is False and project.store.cards["c2"]["author"] == "package:clarify"
-    bad = call("graph_apply", ops=[{"op": "delete_card", "id": "c1"}])
-    assert bad["isError"] is True and "Корневую" in bad["content"][0]["text"]
+    bad = call("graph_apply", ops=[{"op": "delete_card", "id": "c99"}])
+    assert bad["isError"] is True
     monkeypatch.setenv("IDEA_GRAPH_TOKEN", "чужой")
     assert call("graph_read", mode="outline")["isError"] is True
-
-
-def test_create_with_domain_card_written_by_human(served, tmp_path):
-    code, state = http(served, "/api/project/create",
-                       {"folder": str(tmp_path / "p"), "title": "Запись к врачу",
-                        "domain": "Пациенты частных клиник старше 30 лет"})
-    assert code == 200 and state["revision"] == 2
-    cards = http(served, "/api/graph")[1]["cards"]
-    domain = next(c for c in cards if c["kind"] == "домен")
-    assert domain["title"] == "Пациенты частных клиник старше 30 лет"
-    assert domain["author"] == "human" and domain["status"] == "accepted"

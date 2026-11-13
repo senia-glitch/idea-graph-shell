@@ -26,6 +26,7 @@ DEFAULTS = {
         "important_dependents": 3,     # вопрос важный, если от его карточки зависит столько карточек
     },
     "recent": [],
+    "projects_root": "",               # корневая папка проектов; пусто — «Документы\\Граф идеи»
 }
 
 
@@ -67,8 +68,10 @@ class Settings:
 
     def update(self, patch: dict) -> dict:
         allowed = {k: v for k, v in (patch or {}).items()
-                   if k in ("slots", "default_slot", "deciders", "automation")}
+                   if k in ("slots", "default_slot", "deciders", "automation", "projects_root")}
         deciders = allowed.get("deciders")
+        if "projects_root" in allowed:
+            allowed["projects_root"] = str(allowed["projects_root"] or "").strip()
         self.data = _merge(self.data, {k: v for k, v in allowed.items() if k != "deciders"})
         if isinstance(deciders, list) and len(deciders) == 2:
             self.data["deciders"] = [

@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from idea_graph_core import HUMAN, GraphError, Store, author_name, views
+from idea_graph_core import GraphError, Store, author_name, views
 
 from .agents import Adapters
 from .config import Settings
@@ -36,7 +37,7 @@ class App:
         self.base_url = ""
         self.lock = threading.Lock()
 
-    # ---------------------------------------------------------------- идеи
+    # ---------------------------------------------------------------- проекты
 
     def open(self, folder: str) -> Project:
         path = Path(folder).expanduser()
@@ -49,15 +50,41 @@ class App:
         self.settings.remember(str(project.folder))
         return project
 
-    def create(self, folder: str, title: str, body: str = "", domain: str = "") -> Project:
-        path = Path(folder).expanduser()
-        if not str(folder).strip():
-            raise ShellError("invalid_input", "Укажите папку проекта")
+    def projects_root(self) -> Path:
+        """Корневая папка проектов из настроек; по умолчанию «Документы\\Граф идеи»."""
+        chosen = str(self.settings.data.get("projects_root") or "").strip()
+        return Path(chosen).expanduser() if chosen else Path.home() / "Documents" / "Граф идеи"
+
+    def projects(self) -> list[dict]:
+        """Проекты в корневой папке: её подпапки, где есть граф."""
+        root = self.projects_root()
+        found = []
+        try:
+            folders = sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name.lower())
+        except OSError:
+            return []
+        for folder in folders:
+            if Store.exists(folder):
+                try:
+                    title = Store.open(folder).title
+                except GraphError:
+                    continue
+                found.append({"folder": str(folder), "name": folder.name, "title": title or folder.name})
+        return found
+
+    def create(self, title: str, parent: str = "") -> Project:
+        """Новый проект: подпапка с именем проекта в корневой папке (или в указанной)."""
+        title = title.strip()
+        name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", title).strip(" .")
+        name = " ".join(name.split())
+        if not name:
+            raise ShellError("invalid_input", "Введите название проекта")
+        base = Path(parent).expanduser() if parent.strip() else self.projects_root()
+        path = base / name
+        if Store.exists(path):
+            raise ShellError("already_exists", f"Проект «{name}» уже есть в папке {base}")
         path.mkdir(parents=True, exist_ok=True)
-        store = Store.create(path, title, body)
-        if domain.strip():      # домен всегда пишет человек: это первая карточка этапа «Проблема»
-            store.apply([{"op": "add_card", "kind": "домен", "title": domain.strip()[:200],
-                          "body": domain.strip() if len(domain.strip()) > 200 else "", "parent": "c1"}], HUMAN)
+        Store.create(path, title)
         return self.open(str(path))
 
     def need(self) -> Project:
@@ -100,19 +127,14 @@ class App:
             item["models"] = adapter.models() if item["found"] else []
         return {"agents": items}
 
-    @staticmethod
-    def default_root() -> str:
-        """Подсказка, где создать папку нового проекта: на рабочем столе, если он есть."""
-        desktop = Path.home() / "Desktop"
-        return str((desktop if desktop.is_dir() else Path.home()) / "Проекты" / "новый-проект")
-
     def boot(self) -> dict:
         return {
             "project": self.project.state() if self.project else None,
             "packages": self.registry.public(),
             "package_errors": self.registry.errors,
             "settings": self.settings.data,
-            "default_root": self.default_root(),
+            "projects_root": str(self.projects_root()),
+            "projects": self.projects(),
             "views": [{"id": m["id"], "tab": m.get("tab") or m["name"]} for m in self.registry.items.values()
                       if m["kind"] == "view"],
         }
@@ -139,8 +161,7 @@ class App:
         if path == "/api/project/open":
             return self.open(str(data.get("folder") or "")).state()
         if path == "/api/project/create":
-            return self.create(str(data.get("folder") or ""), str(data.get("title") or ""),
-                               str(data.get("body") or ""), str(data.get("domain") or "")).state()
+            return self.create(str(data.get("title") or ""), str(data.get("parent") or "")).state()
         if path == "/api/settings":
             return {"settings": self.settings.update(data)}
         if path == "/api/agents/check":

@@ -10,7 +10,7 @@ from idea_graph_shell.runtime import ShellError
 def clarify_script(note, call, request):
     """Ход 1 — вопрос; после ответа — карточка с решением и второй вопрос; затем finish."""
     if "Начало работы" in note:
-        assert "Граф целиком" in note and "[c1] ИДЕЯ" in note
+        assert "Граф целиком" in note and "[c1] ветка" in note
         call("ask", question="Кто пользователь?", cards=["c1"], recommended=1, reason="их больше",
              options=[{"title": "Пациенты", "consequence": "нужен простой вход"}, {"title": "Регистраторы"}])
         assert call("ask", question="ещё?", options=["а", "б"]).startswith("ОТКАЗ one_question")
@@ -32,7 +32,7 @@ def test_human_flow(make):
     project.start("clarify")
     run = wait_for(lambda: project.runs.get("clarify"), ("asking",))
     question = run.question
-    assert question["question"] == "Кто пользователь?" and question["important"] is True  # затронут корень
+    assert question["question"] == "Кто пользователь?" and question["important"] is False  # одна карточка, от неё мало что зависит
     project.answer("clarify", question["id"], {"type": "choice", "indexes": [1]})
     run = wait_for(lambda: project.runs["clarify"] if project.runs["clarify"].question
                    and project.runs["clarify"].question["id"] != question["id"] else None, ("asking",))
@@ -279,4 +279,4 @@ def test_decider_gets_question_through_turn_info(make):
     wait_for(lambda: project.runs.get("clarify"), ("finished",))
     assert "Реши вопрос: Что учесть?" in seen["info"]                       # вопрос пришёл через turn_info
     chosen = project.store.cards["c1"]  # граф не тронут решателем
-    assert chosen["kind"] == "идея"
+    assert chosen["kind"] == "ветка"

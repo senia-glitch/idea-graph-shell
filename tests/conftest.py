@@ -51,7 +51,9 @@ def wait_for(run_getter, statuses, timeout=5.0):
 @pytest.fixture
 def make(tmp_path):
     def build(script, manifests=(), decider_script=None):
-        Store.create(tmp_path / "idea", "Запись к врачу без звонков", "Пациент выбирает время сам")
+        store = Store.create(tmp_path / "idea", "Запись к врачу")
+        store.apply([{"op": "add_card", "kind": "ветка", "title": "Запись к врачу без звонков",
+                      "body": "Пациент выбирает время сам"}], "human")
         settings = Settings(tmp_path / "settings.json")
         settings.data["default_slot"]["agent"] = "script"
         settings.data["deciders"] = [{"agent": "decider-script", "model": "", "effort": ""}] * 2

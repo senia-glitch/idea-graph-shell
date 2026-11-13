@@ -60,8 +60,6 @@ svg.edges .edge-hit,svg.edges .elab{pointer-events:auto;cursor:pointer}
 .card.drop-target{outline:2px dashed var(--acc)}
 .card.dragging{opacity:.96;box-shadow:0 10px 30px #000c;z-index:60!important;cursor:grabbing}
 .card.planned{border-style:dashed;background:rgba(232,163,90,.06)}
-.card.k-root{border-color:var(--acc)}
-.card.k-root .hd .t{font-size:14px}
 .card .hd{padding:6px 9px;font-weight:700;border-bottom:2px solid var(--c,#888);background:rgba(255,255,255,.03);border-radius:10px 10px 0 0;display:flex;gap:6px;align-items:flex-start;min-width:0;touch-action:none}
 .card .hd .grip{flex:none;color:#8a8b93;cursor:grab;font-size:12px;line-height:1;user-select:none}
 .card .hd .grip:hover{color:var(--acc)}

@@ -53,7 +53,7 @@ DECIDER_RULES = """
 
 _GRAPH_READ = {
     "name": "graph_read",
-    "description": "Прочитать граф идеи. mode: outline — оглавление всего графа; card — одна карточка "
+    "description": "Прочитать граф проекта. mode: outline — оглавление всего графа; card — одна карточка "
                    "целиком с соседями (нужен id); changes — что изменилось с твоего прошлого чтения; "
                    "deleted — история удалённых карточек.",
     "inputSchema": {

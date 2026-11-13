@@ -14,7 +14,6 @@ export const S = {
 
 export const $ = (id) => document.getElementById(id);
 export const DETAIL = "детализирует";
-export const ROOT = "идея";
 export const STATUS = {proposed: "предложена", accepted: "принята"};
 
 const bus = new EventTarget();

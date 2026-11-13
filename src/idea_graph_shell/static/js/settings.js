@@ -34,6 +34,9 @@ export async function renderSettings() {
   const hasDecider = S.boot.packages.some((p) => p.kind === "decider");
   const slot = (id) => ({...st.default_slot, ...(st.slots[id] || {})});
   page.innerHTML = `
+    <h2>Корневая папка проектов</h2>
+    <div class="form-grid one"><label>Здесь создаются новые проекты и ищутся существующие (пусто — «Документы\\Граф идеи»)
+      <input id="projectsRoot" value="${esc(st.projects_root || "")}" placeholder="${esc(S.boot.projects_root || "")}"></label></div>
     <h2>Агенты</h2>
     <p class="hint">Оболочка сама запускает выбранного агента и даёт ему только свои инструменты: читать граф, менять граф, задать вопрос, завершить работу. Файлы и терминал агенту закрыты.</p>
     <div class="agents">${agents.map((a) => `<div class="agent-card ${a.found ? "ok" : "bad"}"><b>${esc(a.name)}</b>
@@ -73,6 +76,7 @@ export async function renderSettings() {
   $("saveSettings").onclick = () => act(async () => {
     const data = await api("/api/settings", collect());
     S.boot.settings = data.settings;
+    S.boot = await api("/api/boot");
     toast("Настройки сохранены");
   });
 }
@@ -80,6 +84,7 @@ export async function renderSettings() {
 function collect() {
   const st = S.boot.settings;
   const patch = {
+    projects_root: $("projectsRoot") ? $("projectsRoot").value.trim() : (st.projects_root || ""),
     slots: {}, deciders: [{...st.deciders[0]}, {...st.deciders[1]}], default_slot: {...st.default_slot},
     automation: $("aRounds") ? {rounds: +$("aRounds").value, fuse_decisions: +$("aFuse").value, fuse_cost: +$("aCost").value, important_dependents: +$("aImportant").value} : {...st.automation},
   };

@@ -220,7 +220,7 @@ function renderChat(body) {
   body.dataset.tab = "chat";
   body.dataset.qs = JSON.stringify(questions.map((q) => q.id));
   body.innerHTML =
-    (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).map(chatLine).join("") : '<div class="empty">Нажмите «▶ Запустить». Агент будет задавать вопросы с готовыми вариантами ответа, а ваши ответы превращать в карточки: домен → сценарий → проблема → результат.</div>') +
+    (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).map(chatLine).join("") : '<div class="empty">Нажмите «+ Домен» вверху и напишите, кто испытывает проблему. Затем «▶ Запустить»: агент будет задавать вопросы с готовыми вариантами ответа, а ваши ответы превращать в карточки: домен → сценарий → проблема → результат.</div>') +
     busy.map((r) => `<div class="thinking">${esc(packageName(r.package))}: ${r.status === "deciding" ? "решатель думает" : "агент думает"}<span class="dots"></span></div>`).join("") +
     questions.map(questionHtml).join("");
   bindQuestions(body);
