@@ -90,7 +90,7 @@ PACKAGE_TOOLS = [
     {
         "name": "ask",
         "description": "Задать один конкретный вопрос с готовыми вариантами решения. Человек сможет выбрать "
-                       "вариант, написать своё или отклонить все. После вызова заканчивай ход.",
+                       "любое число вариантов, написать своё, выбрать и дописать своё или отклонить все. После вызова заканчивай ход.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -102,12 +102,9 @@ PACKAGE_TOOLS = [
                         "consequence": {"type": "string", "description": "Одна строка: что из этого следует"},
                     }, "required": ["title"]},
                 },
-                "recommended": {"description": "Номер рекомендуемого варианта (с 1). При multiple=true можно "
-                                                 "передать список номеров — рекомендовать несколько вариантов",
-                                "anyOf": [{"type": "integer"}, {"type": "array", "items": {"type": "integer"}}]},
-                "multiple": {"type": "boolean", "description": "true — варианты не исключают друг друга: человек "
-                             "может выбрать несколько, ни одного или выбрать и дописать своё. По умолчанию false"},
-                "reason": {"type": "string", "description": "Почему рекомендуешь именно его — одна-две строки"},
+                "recommended": {"type": "array", "items": {"type": "integer"},
+                                "description": "Номера рекомендуемых вариантов (с 1); можно рекомендовать несколько"},
+                "reason": {"type": "string", "description": "Почему рекомендуешь именно их — одна-две строки"},
                 "comment": {"type": "string", "description": "Необязательно: что ты хочешь сказать до вопроса "
                             "(например, слабое место прошлого ответа)"},
                 "cards": {"type": "array", "items": {"type": "string"},
@@ -131,6 +128,11 @@ PACKAGE_TOOLS = [
 ]
 
 DECIDER_TOOLS = [
+    {
+        "name": "turn_info",
+        "description": "Вопрос, который нужно решить, и вводные. Вызови первым делом.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
     _GRAPH_READ,
     {
         "name": "decide",
@@ -138,16 +140,13 @@ DECIDER_TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "choice": {"type": "string", "enum": ["option", "multi", "custom", "rejected", "agree"],
-                           "description": "option — один из вариантов; multi — несколько вариантов (если вопрос это позволяет); "
-                                          "custom — своё решение; rejected — "
+                "choice": {"type": "string", "enum": ["choice", "rejected", "agree"],
+                           "description": "choice — выбранные варианты (options) и/или своё (text); rejected — "
                                           "ни один вариант не нужен; agree — принять позицию второго решателя "
                                           "(только в споре)"},
-                "option": {"type": "integer", "description": "Номер варианта (с 1) для choice=option"},
                 "options": {"type": "array", "items": {"type": "integer"},
-                            "description": "Номера вариантов (с 1) для choice=multi; можно вместе с text. "
-                                           "Только если в вопросе multiple=true"},
-                "text": {"type": "string", "description": "Текст своего решения для choice=custom"},
+                            "description": "Номера выбранных вариантов (с 1) для choice=choice: можно несколько"},
+                "text": {"type": "string", "description": "Своё решение или дополнение для choice=choice"},
                 "rationale": {"type": "string", "description": "Обоснование в две-три строки"},
                 "assumption": {"type": "boolean",
                                "description": "true, если для уверенного решения не хватило фактов"},

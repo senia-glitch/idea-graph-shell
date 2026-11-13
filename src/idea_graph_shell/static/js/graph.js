@@ -178,8 +178,8 @@ function decisionBlock(card) {
   if (!d || typeof d !== "object") return "";
   const chosen = d.chosen || {};
   const options = (d.options || []).map((o, i) =>
-    `<li class="${(chosen.type === "option" && chosen.index === i + 1) || (chosen.type === "multi" && (chosen.indexes || []).includes(i + 1)) ? "chosen" : ""}">${esc(o)}</li>`).join("");
-  const what = chosen.type === "custom" ? `своё: «${esc(chosen.value)}»` : chosen.type === "rejected" ? "все варианты отклонены" : esc(chosen.value || "");
+    `<li class="${(chosen.indexes || []).includes(i + 1) ? "chosen" : ""}">${esc(o)}</li>`).join("");
+  const what = chosen.type === "rejected" ? "все варианты отклонены" : esc(chosen.value || "");
   const positions = (d.positions || []).map((p) =>
     `<div class="position"><b>Решатель ${esc(p.slot)}</b>: ${esc(p.value || "")}<br><span class="hint">${esc(p.rationale || "")}</span></div>`).join("");
   return `<div class="decision"><div class="lbl">Решение</div>
@@ -255,18 +255,18 @@ function renderInspector() {
 
 function renderOverride(card) {
   const d = card.decision;
-  const options = (d.options || []).map((o, i) => `<label class="radio"><input type="radio" name="ov" value="${i + 1}">${esc(o)}</label>`).join("");
+  const options = (d.options || []).map((o, i) => `<label class="radio"><input type="checkbox" name="ov" value="${i + 1}">${esc(o)}</label>`).join("");
   $("overrideBox").innerHTML = `<form id="ovForm">${options}
-    <label class="radio"><input type="radio" name="ov" value="custom" ${options ? "" : "checked"}>Своё решение</label>
-    <textarea name="text" rows="2" placeholder="Ваше решение"></textarea>
+    <textarea name="text" rows="2" placeholder="Своё решение или дополнение"></textarea>
     <div class="row-actions"><button class="primary">Сохранить моё решение</button></div></form>`;
   $("ovForm").onsubmit = (e) => {
     e.preventDefault();
-    const form = new FormData(e.currentTarget), pick = form.get("ov"), text = String(form.get("text") || "").trim();
-    if (!pick) return toast("Выберите вариант или напишите своё");
-    if (pick === "custom" && !text) return toast("Напишите своё решение");
-    const chosen = pick === "custom" ? {type: "custom", value: text} : {type: "option", index: Number(pick), value: d.options[Number(pick) - 1]};
-    const decision = {...d, chosen, by: "human", assumption: false, disputed: false, overridden: d.by, rationale: text && pick !== "custom" ? text : ""};
+    const form = new FormData(e.currentTarget), text = String(form.get("text") || "").trim();
+    const indexes = form.getAll("ov").map(Number).sort((a, b) => a - b);
+    if (!indexes.length && !text) return toast("Выберите вариант или напишите своё");
+    const values = indexes.map((i) => d.options[i - 1]);
+    const chosen = {type: "choice", indexes, values, text, value: [...values, ...(text ? [text] : [])].join("; ")};
+    const decision = {...d, chosen, by: "human", assumption: false, disputed: false, overridden: d.by, rationale: ""};
     act(async () => {
       await ops([{op: "update_card", id: card.id, decision, status: "accepted"}], "решение агента переопределено человеком");
       toast("Решение переопределено. Зависимые карточки проверит пакет проверки.");

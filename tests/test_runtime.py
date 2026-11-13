@@ -1,8 +1,10 @@
 """Работа пакета: ходы, вопросы, ответы человека и решателя, предохранитель."""
 
+import pytest
 from conftest import wait_for
 
 from idea_graph_core import ACCEPTED, HUMAN
+from idea_graph_shell.runtime import ShellError
 
 
 def clarify_script(note, call, request):
@@ -31,12 +33,13 @@ def test_human_flow(make):
     run = wait_for(lambda: project.runs.get("clarify"), ("asking",))
     question = run.question
     assert question["question"] == "Кто пользователь?" and question["important"] is True  # затронут корень
-    project.answer("clarify", question["id"], {"type": "option", "index": 1})
+    project.answer("clarify", question["id"], {"type": "choice", "indexes": [1]})
     run = wait_for(lambda: project.runs["clarify"] if project.runs["clarify"].question
                    and project.runs["clarify"].question["id"] != question["id"] else None, ("asking",))
     card = project.store.cards["c3"]
     assert card["status"] == ACCEPTED and card["decision"]["by"] == HUMAN
-    assert card["decision"]["chosen"] == {"type": "option", "index": 1, "value": "Пациенты"}
+    assert card["decision"]["chosen"] == {"type": "choice", "indexes": [1], "values": ["Пациенты"], "text": "",
+                                          "value": "Пациенты"}
     assert card["decision"]["options"] == ["Пациенты", "Регистраторы"]
     project.answer("clarify", run.question["id"], {"type": "rejected"})
     run = wait_for(lambda: project.runs["clarify"], ("finished",))
@@ -68,7 +71,7 @@ def test_human_edit_wins_and_changes_reach_agent(make):
     project.start("clarify")
     run = wait_for(lambda: project.runs.get("clarify"), ("asking",))
     project.human_ops([{"op": "update_card", "id": "c2", "title": "Оплата по СБП"}])
-    project.answer("clarify", run.question["id"], {"type": "custom", "value": "своё"})
+    project.answer("clarify", run.question["id"], {"type": "choice", "text": "своё"})
     wait_for(lambda: project.runs["clarify"], ("finished",))
     assert "Оплата по СБП" in seen["note"] and "человек" in seen["note"]
     assert seen["refused"].startswith("ОТКАЗ human_changed")
@@ -101,7 +104,7 @@ def decider_manifest(calls):
 
 def decider_script(note, call, request):
     assert "ОТКАЗ" in call("graph_apply", ops=[])            # решателю граф менять нельзя
-    call("decide", choice="option", option=2, rationale="дешевле отменить", assumption=True)
+    call("decide", choice="choice", options=[2], rationale="дешевле отменить", assumption=True)
     return ""
 
 
@@ -146,12 +149,12 @@ def test_human_decisions_are_untouchable(make):
     calls = []
     project = make(script, [decider_manifest(calls)], decider_script)
     project.human_ops([{"op": "add_card", "kind": "решение", "title": "Только веб", "parent": "c1",
-                        "decision": {"question": "Платформа?", "by": HUMAN, "chosen": {"type": "custom", "value": "веб"}}}])
+                        "decision": {"question": "Платформа?", "by": HUMAN, "chosen": {"type": "choice", "indexes": [], "values": [], "text": "веб", "value": "веб"}}}])
     project.set_answerer("clarify", "decider")
     project.start("clarify")
     run = wait_for(lambda: project.runs.get("clarify"), ("finished",))
     assert calls == [] and len(run.deferred) == 1 and run.question is None
-    project.answer("clarify", run.deferred[0]["id"], {"type": "option", "index": 2})
+    project.answer("clarify", run.deferred[0]["id"], {"type": "choice", "indexes": [2]})
     wait_for(lambda: project.runs["clarify"] if not project.runs["clarify"].deferred
              and project.runs["clarify"].turn == 3 else None, ("finished",))
     assert project.store.cards["c2"]["decision"]["chosen"]["value"] == "Нет"
@@ -209,7 +212,7 @@ def test_failed_turn_keeps_its_inputs(make):
     project.start("clarify")
     run = wait_for(lambda: project.runs.get("clarify"), ("asking",))
     state["fail"] = True
-    project.answer("clarify", run.question["id"], {"type": "option", "index": 1})
+    project.answer("clarify", run.question["id"], {"type": "choice", "indexes": [1]})
     run = wait_for(lambda: project.runs["clarify"], ("error",))
     assert "5-hour limit" in run.error and run.session_id == "s1" and run.turn == 1
     project.start("clarify")
@@ -217,10 +220,9 @@ def test_failed_turn_keeps_its_inputs(make):
     assert "Ответ на твой вопрос" in state["notes"][-1] and "Граф целиком" not in state["notes"][-1]
 
 
-def multi_script(note, call, request):
+def choice_script(note, call, request):
     if "Начало работы" in note:
-        call("ask", question="Что учесть?", multiple=True, recommended=[1, 3], reason="важнее всего",
-             options=["А", "Б", "В"])
+        call("ask", question="Что учесть?", recommended=[1, 3], reason="важнее всего", options=["А", "Б", "В"])
         return ""
     if "Ответ на твой вопрос" in note:
         call("graph_apply", ops=[{"op": "add_card", "kind": "решение", "title": "Итог", "parent": "c1",
@@ -229,36 +231,52 @@ def multi_script(note, call, request):
     return ""
 
 
-def test_multiple_choice_question(make):
-    project = make(multi_script)
+def test_several_options_and_own_text(make):
+    project = make(choice_script)
     project.start("clarify")
     run = wait_for(lambda: project.runs.get("clarify"), ("asking",))
     question = run.question
-    assert question["multiple"] is True and question["recommended_list"] == [1, 3] and question["recommended"] == 1
-    project.answer("clarify", question["id"], {"type": "multi", "indexes": [3, 1, 3], "text": "и ещё Г"})
+    assert question["recommended"] == [1, 3]
+    project.answer("clarify", question["id"], {"type": "choice", "indexes": [3, 1, 3], "text": "и ещё Г"})
     wait_for(lambda: project.runs["clarify"], ("finished",))
     chosen = project.store.cards["c2"]["decision"]["chosen"]
-    assert chosen == {"type": "multi", "indexes": [1, 3], "values": ["А", "В"], "text": "и ещё Г",
+    assert chosen == {"type": "choice", "indexes": [1, 3], "values": ["А", "В"], "text": "и ещё Г",
                       "value": "А; В; и ещё Г"}
+    assert "Выбраны варианты 1, 3" in project.chat[-2]["text"] and "и своё дополнение" in project.chat[-2]["text"]
 
 
-def test_multi_choice_is_normalised_and_checked(make):
-    project = make(multi_script)
-    question = {"options": [{"title": "А"}, {"title": "Б"}], "multiple": True}
-    clean = project._clean_choice
-    assert clean(question, {"type": "multi", "indexes": [2]}) == {"type": "option", "index": 2, "value": "Б"}
-    assert clean(question, {"type": "multi", "indexes": [], "text": "своё"}) == {"type": "custom", "value": "своё"}
-    for bad in ({"type": "multi", "indexes": []}, {"type": "multi", "indexes": [3]}):
-        try:
+def test_answer_is_checked(make):
+    clean = make(choice_script)._clean_choice
+    question = {"options": [{"title": "А"}, {"title": "Б"}]}
+    assert clean(question, {"type": "choice", "indexes": [2]})["values"] == ["Б"]
+    assert clean(question, {"type": "choice", "text": "своё"}) == {
+        "type": "choice", "indexes": [], "values": [], "text": "своё", "value": "своё"}
+    assert clean(question, {"type": "rejected"}) == {"type": "rejected", "value": ""}
+    for bad in ({"type": "choice"}, {"type": "choice", "indexes": [3]}, {"type": "choice", "indexes": ["x"]},
+                {"type": "option", "index": 1}, {"type": "custom", "value": "x"}):
+        with pytest.raises(ShellError):
             clean(question, bad)
-        except Exception as error:  # noqa: BLE001
-            assert "invalid_input" in getattr(error, "code", "invalid_input")
-        else:
-            raise AssertionError("ожидался отказ")
-    single = {"options": [{"title": "А"}, {"title": "Б"}]}
-    try:
-        clean(single, {"type": "multi", "indexes": [1, 2]})
-    except Exception:  # noqa: BLE001
-        pass
-    else:
-        raise AssertionError("в вопросе без multiple несколько вариантов выбирать нельзя")
+
+
+def test_decider_gets_question_through_turn_info(make):
+    seen = {}
+
+    def decider(note, call, request):
+        seen["info"] = call("turn_info")
+        call("decide", choice="choice", options=[1, 2], text="плюс своё", rationale="оба важны")
+        return ""
+
+    def agent(note, call, request):
+        if "Начало работы" in note:
+            call("ask", question="Что учесть?", options=["А", "Б", "В"])
+            return ""
+        call("finish", outcome="готово", summary="ок")
+        return ""
+
+    project = make(agent, [decider_manifest([])], decider)
+    project.set_answerer("clarify", "decider")
+    project.start("clarify")
+    wait_for(lambda: project.runs.get("clarify"), ("finished",))
+    assert "Реши вопрос: Что учесть?" in seen["info"]                       # вопрос пришёл через turn_info
+    chosen = project.store.cards["c1"]  # граф не тронут решателем
+    assert chosen["kind"] == "идея"

@@ -118,16 +118,12 @@ function openQuestions() {
   return out.sort((a, b) => (a.package === S.pkg ? -1 : 0) - (b.package === S.pkg ? -1 : 0));
 }
 
-function recommends(q, number) {
-  return (q.recommended_list && q.recommended_list.length ? q.recommended_list : [q.recommended]).includes(number);
-}
-
 function questionHtml(q) {
   const picked = D.picked[q.id] || [];
   const options = q.options.map((o, i) => `
-    <button class="option${recommends(q, i + 1) ? " rec" : ""}${q.multiple && picked.includes(i + 1) ? " picked" : ""}" data-q="${q.id}" data-pkg="${q.package}" ${q.multiple ? "data-toggle" : "data-option"}="${i + 1}">
-      <span class="num">${q.multiple ? (picked.includes(i + 1) ? "✓" : "") : i + 1}</span><span class="otext"><b>${esc(o.title)}</b>${o.consequence ? `<span class="cons">${esc(o.consequence)}</span>` : ""}
-      ${recommends(q, i + 1) ? `<span class="recmark">рекомендация агента${q.reason ? ": " + esc(q.reason) : ""}</span>` : ""}</span>
+    <button class="option${(q.recommended || []).includes(i + 1) ? " rec" : ""}${picked.includes(i + 1) ? " picked" : ""}" data-q="${q.id}" data-pkg="${q.package}" data-toggle="${i + 1}">
+      <span class="num">${picked.includes(i + 1) ? "✓" : ""}</span><span class="otext"><b>${esc(o.title)}</b>${o.consequence ? `<span class="cons">${esc(o.consequence)}</span>` : ""}
+      ${(q.recommended || []).includes(i + 1) ? `<span class="recmark">рекомендация агента${q.reason ? ": " + esc(q.reason) : ""}</span>` : ""}</span>
     </button>`).join("");
   const cards = (q.cards || []).concat(q.revisits || []).filter((v, i, a) => a.indexOf(v) === i);
   const index = graphIndex();
@@ -138,12 +134,11 @@ function questionHtml(q) {
     ${q.comment ? `<div class="qcomment">${esc(q.comment)}</div>` : ""}
     <div class="qtext">${esc(q.question)}</div>
     ${cards.length ? `<div class="qcards">${cards.filter((id) => index.cards.has(id)).map((id) => `<a href="#" data-card="${id}">${esc(index.cards.get(id).title)}</a>`).join("")}</div>` : ""}
-    ${q.multiple ? '<div class="hint">Можно отметить несколько вариантов, не отмечать ни одного и дописать своё.</div>' : ""}
+    <div class="hint">Можно отметить несколько вариантов, не отмечать ни одного и дописать своё.</div>
     <div class="options">${options}</div>
-    <div class="qcustom"><textarea rows="2" data-custom="${q.id}" placeholder="${q.multiple ? "Своё дополнение или своё решение…" : "Своё решение…"}">${esc(D.custom[q.id] || "")}</textarea>
+    <div class="qcustom"><textarea rows="2" data-custom="${q.id}" placeholder="Своё дополнение или своё решение…">${esc(D.custom[q.id] || "")}</textarea>
       <div class="row-actions"><button data-q="${q.id}" data-pkg="${q.package}" data-reject title="Ни один вариант не нужен: ничего не добавлять">Отклонить всё</button>
-      ${q.multiple ? `<button class="primary" data-q="${q.id}" data-pkg="${q.package}" data-send>Ответить (${picked.length ? "выбрано: " + picked.length : "своим"})</button>`
-        : `<button class="primary" data-q="${q.id}" data-pkg="${q.package}" data-own>Ответить своим</button>`}</div></div>
+      <button class="primary" data-q="${q.id}" data-pkg="${q.package}" data-send>Ответить${picked.length ? " (выбрано: " + picked.length + ")" : ""}</button></div></div>
   </div>`;
 }
 
@@ -166,16 +161,11 @@ function bindQuestions(body) {
         emit("poll");
         return;
       }
-      if ("send" in button.dataset) {
+      if ("reject" in button.dataset) choice = {type: "rejected", value: (D.custom[id] || "").trim()};
+      else {
         const text = (D.custom[id] || "").trim(), indexes = [...(D.picked[id] || [])].sort((a, b) => a - b);
         if (!indexes.length && !text) return toast("Отметьте вариант или напишите своё");
-        choice = {type: "multi", indexes, text};
-      } else if (button.dataset.option) choice = {type: "option", index: Number(button.dataset.option)};
-      else if ("reject" in button.dataset) choice = {type: "rejected", value: (D.custom[id] || "").trim()};
-      else {
-        const text = (D.custom[id] || "").trim();
-        if (!text) return toast("Напишите своё решение в поле выше");
-        choice = {type: "custom", value: text};
+        choice = {type: "choice", indexes, text};
       }
       box.classList.add("sent");
       act(async () => {
@@ -250,7 +240,7 @@ function renderDecisions(body) {
     `<button data-filter="${key}" class="${D.filter === key ? "on" : ""}">${names[key]} · ${all.filter(filters[key]).length}</button>`).join("")}</div>` +
     (list.map((c) => {
       const d = c.decision, chosen = d.chosen;
-      const what = chosen.type === "custom" ? "своё: " + chosen.value : chosen.type === "rejected" ? "отклонено" : chosen.value;
+      const what = chosen.type === "rejected" ? "отклонено" : chosen.value;
       return `<a href="#" class="decision-row" data-card="${c.id}"><b>${esc(c.title)}</b>
         <span>${esc(d.question || "")} → <b>${esc(what)}</b></span>
         <span class="hint">${esc(authorName(d.by))}${d.assumption ? " · допущение" : ""}${d.disputed ? " · после спора" : ""}${d.overridden ? " · переопределено вами" : ""}</span>
