@@ -3,7 +3,7 @@
 import {$, S, act, api, authorName, emit, esc, on, packageName, toast, when} from "./core.js";
 import {graphIndex, loadGraph} from "./graph.js";
 
-const D = {tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}};
+const D = {tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}, picked: {}};
 
 const STATUS_TEXT = {
   idle: "ждёт", running: "думает…", asking: "ждёт вашего ответа", deciding: "решатель думает…",
@@ -118,11 +118,16 @@ function openQuestions() {
   return out.sort((a, b) => (a.package === S.pkg ? -1 : 0) - (b.package === S.pkg ? -1 : 0));
 }
 
+function recommends(q, number) {
+  return (q.recommended_list && q.recommended_list.length ? q.recommended_list : [q.recommended]).includes(number);
+}
+
 function questionHtml(q) {
+  const picked = D.picked[q.id] || [];
   const options = q.options.map((o, i) => `
-    <button class="option${q.recommended === i + 1 ? " rec" : ""}" data-q="${q.id}" data-pkg="${q.package}" data-option="${i + 1}">
-      <span class="num">${i + 1}</span><span class="otext"><b>${esc(o.title)}</b>${o.consequence ? `<span class="cons">${esc(o.consequence)}</span>` : ""}
-      ${q.recommended === i + 1 ? `<span class="recmark">рекомендация агента${q.reason ? ": " + esc(q.reason) : ""}</span>` : ""}</span>
+    <button class="option${recommends(q, i + 1) ? " rec" : ""}${q.multiple && picked.includes(i + 1) ? " picked" : ""}" data-q="${q.id}" data-pkg="${q.package}" ${q.multiple ? "data-toggle" : "data-option"}="${i + 1}">
+      <span class="num">${q.multiple ? (picked.includes(i + 1) ? "✓" : "") : i + 1}</span><span class="otext"><b>${esc(o.title)}</b>${o.consequence ? `<span class="cons">${esc(o.consequence)}</span>` : ""}
+      ${recommends(q, i + 1) ? `<span class="recmark">рекомендация агента${q.reason ? ": " + esc(q.reason) : ""}</span>` : ""}</span>
     </button>`).join("");
   const cards = (q.cards || []).concat(q.revisits || []).filter((v, i, a) => a.indexOf(v) === i);
   const index = graphIndex();
@@ -133,10 +138,12 @@ function questionHtml(q) {
     ${q.comment ? `<div class="qcomment">${esc(q.comment)}</div>` : ""}
     <div class="qtext">${esc(q.question)}</div>
     ${cards.length ? `<div class="qcards">${cards.filter((id) => index.cards.has(id)).map((id) => `<a href="#" data-card="${id}">${esc(index.cards.get(id).title)}</a>`).join("")}</div>` : ""}
+    ${q.multiple ? '<div class="hint">Можно отметить несколько вариантов, не отмечать ни одного и дописать своё.</div>' : ""}
     <div class="options">${options}</div>
-    <div class="qcustom"><textarea rows="2" data-custom="${q.id}" placeholder="Своё решение…">${esc(D.custom[q.id] || "")}</textarea>
+    <div class="qcustom"><textarea rows="2" data-custom="${q.id}" placeholder="${q.multiple ? "Своё дополнение или своё решение…" : "Своё решение…"}">${esc(D.custom[q.id] || "")}</textarea>
       <div class="row-actions"><button data-q="${q.id}" data-pkg="${q.package}" data-reject title="Ни один вариант не нужен: ничего не добавлять">Отклонить всё</button>
-      <button class="primary" data-q="${q.id}" data-pkg="${q.package}" data-own>Ответить своим</button></div></div>
+      ${q.multiple ? `<button class="primary" data-q="${q.id}" data-pkg="${q.package}" data-send>Ответить (${picked.length ? "выбрано: " + picked.length : "своим"})</button>`
+        : `<button class="primary" data-q="${q.id}" data-pkg="${q.package}" data-own>Ответить своим</button>`}</div></div>
   </div>`;
 }
 
@@ -152,7 +159,18 @@ function bindQuestions(body) {
       if (!button) return;
       const id = button.dataset.q;
       let choice;
-      if (button.dataset.option) choice = {type: "option", index: Number(button.dataset.option)};
+      if (button.dataset.toggle) {
+        const n = Number(button.dataset.toggle), list = D.picked[id] || (D.picked[id] = []);
+        const at = list.indexOf(n);
+        if (at >= 0) list.splice(at, 1); else list.push(n);
+        emit("poll");
+        return;
+      }
+      if ("send" in button.dataset) {
+        const text = (D.custom[id] || "").trim(), indexes = [...(D.picked[id] || [])].sort((a, b) => a - b);
+        if (!indexes.length && !text) return toast("Отметьте вариант или напишите своё");
+        choice = {type: "multi", indexes, text};
+      } else if (button.dataset.option) choice = {type: "option", index: Number(button.dataset.option)};
       else if ("reject" in button.dataset) choice = {type: "rejected", value: (D.custom[id] || "").trim()};
       else {
         const text = (D.custom[id] || "").trim();
@@ -163,6 +181,7 @@ function bindQuestions(body) {
       act(async () => {
         await api("/api/run/answer", {package: button.dataset.pkg, question: id, choice});
         delete D.custom[id];
+        delete D.picked[id];
         emit("poll");
       }).then(() => box.classList.remove("sent"));
     });
@@ -201,7 +220,7 @@ function renderBody() {
 function renderChat(body) {
   const typing = body.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
   const questions = openQuestions();
-  const signature = JSON.stringify([S.chat.length, S.chat.at(-1)?.seq, questions.map((q) => q.id + q.deferred), S.pkg, graphIndex().cards.size, Object.values(S.project.runs).map((r) => r.status)]);
+  const signature = JSON.stringify([S.chat.length, S.chat.at(-1)?.seq, questions.map((q) => q.id + q.deferred), JSON.stringify(D.picked), S.pkg, graphIndex().cards.size, Object.values(S.project.runs).map((r) => r.status)]);
   if (body.dataset.sig === signature && body.dataset.tab === "chat") return;
   if (typing && body.dataset.tab === "chat" && JSON.stringify(questions.map((q) => q.id)) === body.dataset.qs) return;   // не сбиваем ввод своего ответа
   const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 60 || body.dataset.tab !== "chat";

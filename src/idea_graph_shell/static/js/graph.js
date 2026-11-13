@@ -178,7 +178,7 @@ function decisionBlock(card) {
   if (!d || typeof d !== "object") return "";
   const chosen = d.chosen || {};
   const options = (d.options || []).map((o, i) =>
-    `<li class="${chosen.type === "option" && chosen.index === i + 1 ? "chosen" : ""}">${esc(o)}</li>`).join("");
+    `<li class="${(chosen.type === "option" && chosen.index === i + 1) || (chosen.type === "multi" && (chosen.indexes || []).includes(i + 1)) ? "chosen" : ""}">${esc(o)}</li>`).join("");
   const what = chosen.type === "custom" ? `своё: «${esc(chosen.value)}»` : chosen.type === "rejected" ? "все варианты отклонены" : esc(chosen.value || "");
   const positions = (d.positions || []).map((p) =>
     `<div class="position"><b>Решатель ${esc(p.slot)}</b>: ${esc(p.value || "")}<br><span class="hint">${esc(p.rationale || "")}</span></div>`).join("");

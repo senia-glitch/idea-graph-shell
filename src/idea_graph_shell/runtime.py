@@ -586,7 +586,42 @@ class Project:
             return {"type": "custom", "value": text[:4000]}
         if kind == "rejected":
             return {"type": "rejected", "value": str(choice.get("value") or "").strip()[:2000]}
-        raise ShellError("invalid_input", "Ответ: вариант (option), своё (custom) или отклонить (rejected)")
+        if kind == "multi":
+            if not question.get("multiple"):
+                raise ShellError("invalid_input", "На этот вопрос можно выбрать только один вариант")
+            return Project._clean_multi(question, choice)
+        raise ShellError("invalid_input", "Ответ: вариант (option), своё (custom), несколько (multi) "
+                                          "или отклонить (rejected)")
+
+    @staticmethod
+    def _clean_multi(question: dict, choice: dict) -> dict:
+        """Несколько вариантов и/или своё. Сводится к простому виду, если выбрано что-то одно."""
+        raw = choice.get("indexes")
+        if raw is None:
+            raw = []
+        if not isinstance(raw, list):
+            raise ShellError("invalid_input", "indexes — список номеров вариантов")
+        indexes: list[int] = []
+        for item in raw:
+            try:
+                index = int(item)
+            except (TypeError, ValueError):
+                raise ShellError("invalid_input", "Номер варианта должен быть числом") from None
+            if not 1 <= index <= len(question["options"]):
+                raise ShellError("invalid_input", "Такого варианта нет")
+            if index not in indexes:
+                indexes.append(index)
+        indexes.sort()
+        text = str(choice.get("text") or choice.get("value") or "").strip()[:4000]
+        if not indexes and not text:
+            raise ShellError("invalid_input", "Не выбран ни один вариант и нет своего текста")
+        if not indexes:
+            return {"type": "custom", "value": text}
+        titles = [question["options"][i - 1]["title"] for i in indexes]
+        if len(indexes) == 1 and not text:
+            return {"type": "option", "index": indexes[0], "value": titles[0]}
+        return {"type": "multi", "indexes": indexes, "values": titles, "text": text,
+                "value": "; ".join(titles + ([text] if text else []))}
 
     def _deliver(self, run: Run, question: dict, answer: dict, deferred: bool = False) -> None:
         chosen = answer["chosen"]
@@ -594,6 +629,10 @@ class Project:
             what = f"выбран вариант {chosen['index']} — «{chosen['value']}»"
         elif chosen["type"] == "custom":
             what = f"свой ответ: «{chosen['value']}»"
+        elif chosen["type"] == "multi":
+            what = ("выбраны варианты " + ", ".join(str(i) for i in chosen["indexes"]) + " — "
+                    + "; ".join(f"«{v}»" for v in chosen["values"])
+                    + (f"; и своё дополнение: «{chosen['text']}»" if chosen.get("text") else ""))
         else:
             what = "все варианты отклонены" + (f" ({chosen['value']})" if chosen.get("value") else "")
         who = "человек" if answer["by"] == HUMAN else "решатель"
@@ -779,16 +818,25 @@ class Project:
             value = args.get(key) or []
             return [c for c in value if isinstance(c, str) and c in known] if isinstance(value, list) else []
 
-        recommended = args.get("recommended")
-        try:
-            recommended = int(recommended) if recommended is not None else None
-        except (TypeError, ValueError):
-            recommended = None
-        if recommended is not None and not 1 <= recommended <= len(options):
-            recommended = None
+        raw_rec = args.get("recommended")
+        if not isinstance(raw_rec, list):
+            raw_rec = [] if raw_rec is None else [raw_rec]
+        multiple = bool(args.get("multiple"))
+        rec_list: list[int] = []
+        for item in raw_rec:
+            try:
+                number = int(item)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= number <= len(options) and number not in rec_list:
+                rec_list.append(number)
+        if not multiple:
+            rec_list = rec_list[:1]
+        recommended = rec_list[0] if rec_list else None
         question = {
             "id": secrets.token_hex(6), "package": run.package, "question": text[:1000], "options": options,
-            "recommended": recommended, "reason": str(args.get("reason") or "").strip()[:800],
+            "recommended": recommended, "recommended_list": rec_list, "multiple": multiple,
+            "reason": str(args.get("reason") or "").strip()[:800],
             "comment": str(args.get("comment") or "").strip()[:1500],
             "cards": ids("cards"), "revisits": ids("revisits"), "asked_rev": self.store.revision,
             "state": "open",
@@ -825,12 +873,15 @@ class Project:
             chosen = self._clean_choice(question, {"type": "option", "index": args.get("option")})
         elif choice == "custom":
             chosen = self._clean_choice(question, {"type": "custom", "value": args.get("text")})
+        elif choice == "multi":
+            chosen = self._clean_choice(question, {"type": "multi", "indexes": args.get("options"),
+                                                   "text": args.get("text")})
         elif choice == "rejected":
             chosen = {"type": "rejected", "value": ""}
         elif choice == "agree" and ctx.get("allow_agree"):
             chosen = {"type": "agree"}
         else:
-            raise ShellError("invalid_input", "choice: option, custom или rejected"
+            raise ShellError("invalid_input", "choice: option, custom, multi или rejected"
                              + (", agree" if ctx.get("allow_agree") else ""))
         rationale = str(args.get("rationale") or "").strip()
         if not rationale:

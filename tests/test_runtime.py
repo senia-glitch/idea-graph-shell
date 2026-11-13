@@ -215,3 +215,50 @@ def test_failed_turn_keeps_its_inputs(make):
     project.start("clarify")
     run = wait_for(lambda: project.runs["clarify"], ("finished",))
     assert "Ответ на твой вопрос" in state["notes"][-1] and "Граф целиком" not in state["notes"][-1]
+
+
+def multi_script(note, call, request):
+    if "Начало работы" in note:
+        call("ask", question="Что учесть?", multiple=True, recommended=[1, 3], reason="важнее всего",
+             options=["А", "Б", "В"])
+        return ""
+    if "Ответ на твой вопрос" in note:
+        call("graph_apply", ops=[{"op": "add_card", "kind": "решение", "title": "Итог", "parent": "c1",
+                                  "status": "accepted", "decision": "last"}])
+    call("finish", outcome="готово", summary="ок")
+    return ""
+
+
+def test_multiple_choice_question(make):
+    project = make(multi_script)
+    project.start("clarify")
+    run = wait_for(lambda: project.runs.get("clarify"), ("asking",))
+    question = run.question
+    assert question["multiple"] is True and question["recommended_list"] == [1, 3] and question["recommended"] == 1
+    project.answer("clarify", question["id"], {"type": "multi", "indexes": [3, 1, 3], "text": "и ещё Г"})
+    wait_for(lambda: project.runs["clarify"], ("finished",))
+    chosen = project.store.cards["c2"]["decision"]["chosen"]
+    assert chosen == {"type": "multi", "indexes": [1, 3], "values": ["А", "В"], "text": "и ещё Г",
+                      "value": "А; В; и ещё Г"}
+
+
+def test_multi_choice_is_normalised_and_checked(make):
+    project = make(multi_script)
+    question = {"options": [{"title": "А"}, {"title": "Б"}], "multiple": True}
+    clean = project._clean_choice
+    assert clean(question, {"type": "multi", "indexes": [2]}) == {"type": "option", "index": 2, "value": "Б"}
+    assert clean(question, {"type": "multi", "indexes": [], "text": "своё"}) == {"type": "custom", "value": "своё"}
+    for bad in ({"type": "multi", "indexes": []}, {"type": "multi", "indexes": [3]}):
+        try:
+            clean(question, bad)
+        except Exception as error:  # noqa: BLE001
+            assert "invalid_input" in getattr(error, "code", "invalid_input")
+        else:
+            raise AssertionError("ожидался отказ")
+    single = {"options": [{"title": "А"}, {"title": "Б"}]}
+    try:
+        clean(single, {"type": "multi", "indexes": [1, 2]})
+    except Exception:  # noqa: BLE001
+        pass
+    else:
+        raise AssertionError("в вопросе без multiple несколько вариантов выбирать нельзя")

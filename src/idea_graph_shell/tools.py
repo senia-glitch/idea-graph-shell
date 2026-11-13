@@ -102,7 +102,11 @@ PACKAGE_TOOLS = [
                         "consequence": {"type": "string", "description": "Одна строка: что из этого следует"},
                     }, "required": ["title"]},
                 },
-                "recommended": {"type": "integer", "description": "Номер варианта, который ты рекомендуешь (с 1)"},
+                "recommended": {"description": "Номер рекомендуемого варианта (с 1). При multiple=true можно "
+                                                 "передать список номеров — рекомендовать несколько вариантов",
+                                "anyOf": [{"type": "integer"}, {"type": "array", "items": {"type": "integer"}}]},
+                "multiple": {"type": "boolean", "description": "true — варианты не исключают друг друга: человек "
+                             "может выбрать несколько, ни одного или выбрать и дописать своё. По умолчанию false"},
                 "reason": {"type": "string", "description": "Почему рекомендуешь именно его — одна-две строки"},
                 "comment": {"type": "string", "description": "Необязательно: что ты хочешь сказать до вопроса "
                             "(например, слабое место прошлого ответа)"},
@@ -134,11 +138,15 @@ DECIDER_TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "choice": {"type": "string", "enum": ["option", "custom", "rejected", "agree"],
-                           "description": "option — один из вариантов; custom — своё решение; rejected — "
+                "choice": {"type": "string", "enum": ["option", "multi", "custom", "rejected", "agree"],
+                           "description": "option — один из вариантов; multi — несколько вариантов (если вопрос это позволяет); "
+                                          "custom — своё решение; rejected — "
                                           "ни один вариант не нужен; agree — принять позицию второго решателя "
                                           "(только в споре)"},
                 "option": {"type": "integer", "description": "Номер варианта (с 1) для choice=option"},
+                "options": {"type": "array", "items": {"type": "integer"},
+                            "description": "Номера вариантов (с 1) для choice=multi; можно вместе с text. "
+                                           "Только если в вопросе multiple=true"},
                 "text": {"type": "string", "description": "Текст своего решения для choice=custom"},
                 "rationale": {"type": "string", "description": "Обоснование в две-три строки"},
                 "assumption": {"type": "boolean",
