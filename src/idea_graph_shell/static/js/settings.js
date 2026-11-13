@@ -31,6 +31,7 @@ export async function renderSettings() {
   }
   const st = S.boot.settings, auto = st.automation;
   const packages = S.boot.packages.filter((p) => p.kind === "agent");
+  const hasDecider = S.boot.packages.some((p) => p.kind === "decider");
   const slot = (id) => ({...st.default_slot, ...(st.slots[id] || {})});
   page.innerHTML = `
     <h2>Агенты</h2>
@@ -42,16 +43,16 @@ export async function renderSettings() {
     <table class="slots"><thead><tr><th>Пакет</th><th>Агент</th><th>Модель</th><th>Усилие</th></tr></thead><tbody>
       ${slotRow("default", "По умолчанию", "для пакетов без своей настройки", st.default_slot)}
       ${packages.map((p) => slotRow("pkg:" + p.id, p.name, `рекомендуемая модель: ${p.model_level}${p.web_search ? " · нужен веб-поиск" : ""}`, slot(p.id))).join("")}
-      ${slotRow("decider:0", "Решатель 1", "отвечает на вопросы вместо вас", st.deciders[0])}
-      ${slotRow("decider:1", "Решатель 2", "подключается к важным вопросам; дайте ему другую модель", st.deciders[1])}
+      ${hasDecider ? slotRow("decider:0", "Решатель 1", "отвечает на вопросы вместо вас", st.deciders[0]) : ""}
+      ${hasDecider ? slotRow("decider:1", "Решатель 2", "подключается к важным вопросам; дайте ему другую модель", st.deciders[1]) : ""}
     </tbody></table>
-    <h2>Автоматика</h2>
+    ${hasDecider ? `<h2>Автоматика</h2>
     <div class="form-grid">
       <label>Кругов спора у пары решателей<input type="number" min="0" max="6" id="aRounds" value="${auto.rounds}"></label>
       <label>Пауза после стольких решений подряд без вас (0 — без паузы)<input type="number" min="0" max="500" id="aFuse" value="${auto.fuse_decisions}"></label>
       <label>Пауза после такой суммы расходов без вас, $ (0 — без паузы)<input type="number" min="0" step="0.5" id="aCost" value="${auto.fuse_cost}"></label>
       <label>Вопрос важный, если от его карточки зависит столько карточек<input type="number" min="1" max="50" id="aImportant" value="${auto.important_dependents}"></label>
-    </div>
+    </div>` : ""}
     <div class="row-actions"><button class="primary" id="saveSettings">Сохранить настройки</button></div>
     <h2>Установленные пакеты</h2>
     <table class="slots"><tbody>${S.boot.packages.map((p) => `<tr><td><b>${esc(p.name)}</b> <span class="hint">${esc(p.id)} ${esc(p.version || "")}</span><div class="hint">${esc(p.description)}</div></td>
@@ -80,7 +81,7 @@ function collect() {
   const st = S.boot.settings;
   const patch = {
     slots: {}, deciders: [{...st.deciders[0]}, {...st.deciders[1]}], default_slot: {...st.default_slot},
-    automation: {rounds: +$("aRounds").value, fuse_decisions: +$("aFuse").value, fuse_cost: +$("aCost").value, important_dependents: +$("aImportant").value},
+    automation: $("aRounds") ? {rounds: +$("aRounds").value, fuse_decisions: +$("aFuse").value, fuse_cost: +$("aCost").value, important_dependents: +$("aImportant").value} : {...st.automation},
   };
   document.querySelectorAll("tr[data-slot]").forEach((row) => {
     const slot = {};

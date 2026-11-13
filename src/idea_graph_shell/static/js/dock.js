@@ -66,7 +66,7 @@ export function renderDock() {
     const run = runOf(p.id), status = run?.status || "idle";
     return `<button class="pkg${p.id === S.pkg ? " on" : ""}" data-pkg="${p.id}" title="${esc(p.description)}">
       <span class="dot s-${status}"></span>${esc(p.name)}</button>`;
-  }).join("") || '<div class="hint">Пакеты не установлены. Поставьте, например, idea-graph-clarify и перезапустите оболочку.</div>');
+  }).join("") || '<div class="hint">Пакеты не установлены. Поставьте idea-graph-problem и перезапустите оболочку.</div>');
   renderControls();
   const questions = openQuestions().length;
   const decided = decisionCards().filter((c) => c.decision.by !== "human").length;
@@ -92,7 +92,7 @@ function renderControls() {
         : `<button class="primary" data-do="${status === "paused" ? "resume" : "start"}">${status === "paused" ? "Продолжить" : started && pkg.kind === "agent" && status !== "finished" ? "▶ Продолжить" : "▶ Запустить"}</button>`}
       ${started && !busy && pkg.kind === "agent" ? '<button data-do="fresh" title="Начать с новой сессией агента: он получит весь граф заново">Заново</button>' : ""}
     </div>
-    ${pkg.asks ? `<div class="ctl-row"><span class="hint">На вопросы отвечает:</span>
+    ${pkg.asks && S.boot.packages.some((p) => p.kind === "decider") ? `<div class="ctl-row"><span class="hint">На вопросы отвечает:</span>
       <div class="seg"><button data-who="human" class="${answerer === "human" ? "on" : ""}">Я</button><button data-who="decider" class="${answerer === "decider" ? "on" : ""}" title="Пакет-решатель: его решения помечаются и их можно переопределить">Решатель</button></div></div>` : ""}
     ${run?.error ? `<div class="err">${esc(run.error)}</div>` : ""}
     ${status === "paused" && run.pause_reason ? `<div class="warn-box">${esc(run.pause_reason)}</div>` : ""}
@@ -220,7 +220,7 @@ function renderChat(body) {
   body.dataset.tab = "chat";
   body.dataset.qs = JSON.stringify(questions.map((q) => q.id));
   body.innerHTML =
-    (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).map(chatLine).join("") : '<div class="empty">Запустите пакет — например, «Уточнение идеи». Он будет задавать по одному вопросу с готовыми вариантами, а ответы превращать в карточки графа.</div>') +
+    (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).map(chatLine).join("") : '<div class="empty">Нажмите «▶ Запустить». Агент будет задавать вопросы с готовыми вариантами ответа, а ваши ответы превращать в карточки: домен → сценарий → проблема → результат.</div>') +
     busy.map((r) => `<div class="thinking">${esc(packageName(r.package))}: ${r.status === "deciding" ? "решатель думает" : "агент думает"}<span class="dots"></span></div>`).join("") +
     questions.map(questionHtml).join("");
   bindQuestions(body);

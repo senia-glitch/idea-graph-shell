@@ -1,4 +1,4 @@
-/* Запуск интерфейса: вкладки, выбор идеи, опрос состояния оболочки. */
+/* Запуск интерфейса: вкладки, выбор проекта, опрос состояния оболочки. */
 
 import {createCanvas} from "./canvas.js";
 import {$, S, act, api, emit, esc, on, toast} from "./core.js";
@@ -13,7 +13,7 @@ const mounted = new Map();
 function tabs() {
   const items = S.project
     ? [["graph", "Граф"], ...S.boot.views.map((v) => ["view-" + v.id, v.tab]), ["settings", "Настройки"]]
-    : [["welcome", "Идеи"], ["settings", "Настройки"]];
+    : [["welcome", "Проект"], ["settings", "Настройки"]];
   $("tabs").innerHTML = items.map(([id, name]) => `<button class="tabbtn${tab === id ? " on" : ""}" data-tab="${id}">${esc(name)}</button>`).join("");
 }
 
@@ -53,15 +53,15 @@ async function mountView(id) {
 function renderWelcome() {
   const recent = S.boot.settings.recent || [];
   $("welcomePage").innerHTML = `
-    <h2>Новая идея</h2>
-    <p class="hint">Одна идея — одна папка. Граф хранится в ней (подпапка .idea-graph), поэтому его можно вести в git вместе с остальным.</p>
+    <h2>Новый проект</h2>
+    <p class="hint">Работа начинается с проблемы: сначала вы называете, кто её испытывает, дальше агент помогает описать сценарии, проблемы и нужный результат. Проект хранится в папке (подпапка .idea-graph), поэтому его можно вести в git вместе с остальным.</p>
     <form id="createForm" class="form-grid one">
-      <label>Идея одной строкой<input name="title" required maxlength="200" placeholder="Например: сервис записи к врачу без звонков"></label>
-      <label>Подробнее, если есть что добавить<textarea name="body" rows="4" placeholder="Сырой текст идеи как есть"></textarea></label>
-      <label>Папка идеи (будет создана)<input name="folder" required value="${esc(S.boot.default_root || "")}"></label>
-      <div class="row-actions"><button class="primary">Создать идею</button></div>
+      <label>Название проекта<input name="title" required maxlength="200" placeholder="Например: запись к врачу"></label>
+      <label>Кто испытывает проблему? (домен)<textarea name="domain" rows="3" required placeholder="Конкретная группа с отличительным признаком, например: пациенты частных клиник старше 30 лет"></textarea></label>
+      <label>Папка проекта (будет создана)<input name="folder" required value="${esc(S.boot.default_root || "")}"></label>
+      <div class="row-actions"><button class="primary">Начать</button></div>
     </form>
-    <h2>Открыть идею</h2>
+    <h2>Открыть проект</h2>
     <form id="openForm" class="form-grid one"><label>Папка, где уже есть граф<input name="folder" placeholder="путь к папке"></label>
       <div class="row-actions"><button>Открыть</button></div></form>
     ${recent.length ? `<div class="lbl">Недавние</div><div class="recent">${recent.map((f) => `<a href="#" data-folder="${esc(f)}">${esc(f)}</a>`).join("")}</div>` : ""}`;
@@ -90,7 +90,7 @@ async function openProject() {
   resetGraphView();
   if (!S.project) return show("welcome");
   $("projectTitle").textContent = S.project.title;
-  document.title = S.project.title + " — граф идеи";
+  document.title = S.project.title + " — Граф идеи";
   await show("graph");
   await loadGraph();
   graphRevision = S.project.revision;

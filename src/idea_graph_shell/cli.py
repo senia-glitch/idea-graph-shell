@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="idea-graph",
         description="Оболочка графа идеи: холст, чат, настройки агентов и запуск пакетов.",
     )
-    parser.add_argument("folder", nargs="?", help="папка идеи (можно выбрать позже в интерфейсе)")
+    parser.add_argument("folder", nargs="?", help="папка проекта (по умолчанию — последний открытый)")
     parser.add_argument("--port", type=int, default=8765, help="порт (по умолчанию 8765; 0 — любой свободный)")
     parser.add_argument("--no-browser", action="store_true", help="не открывать браузер")
     parser.add_argument("--packages", action="store_true", help="показать установленные пакеты и выйти")
@@ -43,7 +43,11 @@ def main(argv: list[str] | None = None) -> int:
         if Store.exists(args.folder):
             app.open(args.folder)
         else:
-            print(f"В папке {args.folder} ещё нет идеи — создайте её в интерфейсе.")
+            print(f"В папке {args.folder} ещё нет проекта — создайте его в интерфейсе.")
+    else:                       # без аргумента сразу открываем последний проект
+        last = next((f for f in app.settings.data.get("recent", []) if Store.exists(f)), None)
+        if last:
+            app.open(last)
     print(f"Оболочка запущена: {app.base_url}  (Ctrl+C — остановить)")
     if not args.no_browser:
         webbrowser.open(app.base_url)

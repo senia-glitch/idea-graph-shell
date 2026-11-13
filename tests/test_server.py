@@ -109,3 +109,14 @@ def test_mcp_bridge(served, tmp_path, monkeypatch):
     assert bad["isError"] is True and "Корневую" in bad["content"][0]["text"]
     monkeypatch.setenv("IDEA_GRAPH_TOKEN", "чужой")
     assert call("graph_read", mode="outline")["isError"] is True
+
+
+def test_create_with_domain_card_written_by_human(served, tmp_path):
+    code, state = http(served, "/api/project/create",
+                       {"folder": str(tmp_path / "p"), "title": "Запись к врачу",
+                        "domain": "Пациенты частных клиник старше 30 лет"})
+    assert code == 200 and state["revision"] == 2
+    cards = http(served, "/api/graph")[1]["cards"]
+    domain = next(c for c in cards if c["kind"] == "домен")
+    assert domain["title"] == "Пациенты частных клиник старше 30 лет"
+    assert domain["author"] == "human" and domain["status"] == "accepted"

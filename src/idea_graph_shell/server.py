@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from idea_graph_core import GraphError, Store, author_name, views
+from idea_graph_core import HUMAN, GraphError, Store, author_name, views
 
 from .agents import Adapters
 from .config import Settings
@@ -49,17 +49,20 @@ class App:
         self.settings.remember(str(project.folder))
         return project
 
-    def create(self, folder: str, title: str, body: str = "") -> Project:
+    def create(self, folder: str, title: str, body: str = "", domain: str = "") -> Project:
         path = Path(folder).expanduser()
         if not str(folder).strip():
-            raise ShellError("invalid_input", "Укажите папку идеи")
+            raise ShellError("invalid_input", "Укажите папку проекта")
         path.mkdir(parents=True, exist_ok=True)
-        Store.create(path, title, body)
+        store = Store.create(path, title, body)
+        if domain.strip():      # домен всегда пишет человек: это первая карточка этапа «Проблема»
+            store.apply([{"op": "add_card", "kind": "домен", "title": domain.strip()[:200],
+                          "body": domain.strip() if len(domain.strip()) > 200 else "", "parent": "c1"}], HUMAN)
         return self.open(str(path))
 
     def need(self) -> Project:
         if self.project is None:
-            raise ShellError("no_project", "Сначала откройте или создайте идею")
+            raise ShellError("no_project", "Сначала откройте или создайте проект")
         return self.project
 
     # ---------------------------------------------------------------- ответы на запросы
@@ -99,9 +102,9 @@ class App:
 
     @staticmethod
     def default_root() -> str:
-        """Подсказка, где создать папку новой идеи: на рабочем столе, если он есть."""
+        """Подсказка, где создать папку нового проекта: на рабочем столе, если он есть."""
         desktop = Path.home() / "Desktop"
-        return str((desktop if desktop.is_dir() else Path.home()) / "Идеи" / "новая-идея")
+        return str((desktop if desktop.is_dir() else Path.home()) / "Проекты" / "новый-проект")
 
     def boot(self) -> dict:
         return {
@@ -137,7 +140,7 @@ class App:
             return self.open(str(data.get("folder") or "")).state()
         if path == "/api/project/create":
             return self.create(str(data.get("folder") or ""), str(data.get("title") or ""),
-                               str(data.get("body") or "")).state()
+                               str(data.get("body") or ""), str(data.get("domain") or "")).state()
         if path == "/api/settings":
             return {"settings": self.settings.update(data)}
         if path == "/api/agents/check":
