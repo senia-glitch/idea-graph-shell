@@ -18,9 +18,12 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+OPENCODE_PROVIDER = "opencode-go"        # модели подписки OpenCode Go / Go Plus
+_MODELS_TTL = 600
 SERVER_NAME = "idea-graph"
 TURN_TIMEOUT = 900
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -222,18 +225,58 @@ class OpenCodeAdapter(Adapter):
     PROMPT = "New turn. Call the idea-graph tool turn_info and do exactly what it returns."
 
     def models(self):
+        """Модели подписки Go (провайдер ``opencode-go``) и усилия, которые каждая из них поддерживает.
+
+        Усилие в OpenCode — «вариант» модели (``--variant``): у каждой модели свой набор, у части его нет совсем.
+        """
+        now = time.time()
+        cached = getattr(self, "_models_cache", None)
+        if cached and now - cached[0] < _MODELS_TTL:
+            return [dict(m) for m in cached[1]]
         exe = self.found()
         if not exe:
             return []
+        models = self._verbose_models(exe) or self._plain_models(exe)
+        if models:
+            self._models_cache = (now, models)
+        return [dict(m) for m in models]
+
+    @staticmethod
+    def _list(exe: str, *args: str) -> str:
         try:
             done = subprocess.run(  # noqa: S603
-                [exe, "models"], capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=60, stdin=subprocess.DEVNULL,
+                [exe, "models", OPENCODE_PROVIDER, *args], capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=90, stdin=subprocess.DEVNULL,
             )
         except (OSError, subprocess.TimeoutExpired):
-            return []
-        names = [line.strip() for line in _ANSI.sub("", done.stdout or "").splitlines()]
-        return [{"id": n, "name": n} for n in names if re.fullmatch(r"[\w.:@+-]+/[\w.:@+/-]+", n)]
+            return ""
+        return _ANSI.sub("", done.stdout or "")
+
+    def _verbose_models(self, exe: str) -> list[dict]:
+        text = self._list(exe, "--verbose")
+        decoder = json.JSONDecoder()
+        models, pos = [], 0
+        while True:
+            found = re.compile(rf"^({re.escape(OPENCODE_PROVIDER)}/\S+)[ \t]*\r?\n", re.M).search(text, pos)
+            if not found:
+                break
+            try:
+                data, end = decoder.raw_decode(text, found.end())
+            except ValueError:
+                break
+            pos = end
+            if not isinstance(data, dict) or data.get("status", "active") != "active":
+                continue
+            variants = [v for v in (data.get("variants") or {}) if isinstance(v, str)]
+            title = str(data.get("name") or found.group(1).split("/", 1)[1])
+            models.append({"id": found.group(1), "name": f"{title} ({found.group(1).split('/', 1)[1]})",
+                           "efforts": variants})
+        return models
+
+    def _plain_models(self, exe: str) -> list[dict]:
+        names = [line.strip() for line in self._list(exe).splitlines()]
+        return [{"id": n, "name": n, "efforts": []} for n in names
+                if re.fullmatch(rf"{re.escape(OPENCODE_PROVIDER)}/[\w.:@+/-]+", n)]
 
     def run(self, request):
         exe = self.found()

@@ -440,3 +440,24 @@ def test_research_needs_package_support(make):
     with pytest.raises(ShellError) as info:
         project.start("problem", auto={"targets": [], "only_research": True})
     assert info.value.code == "no_research"
+
+
+def test_unlimited_flag_passes_no_limits_to_the_package(make):
+    notes = []
+
+    def script(note, call, request):
+        notes.append(note)
+        call("finish", outcome="готово", summary="ок")
+        return ""
+
+    manifest = auto_manifest()
+    manifest["auto"]["note"] = lambda ctx, targets, limits, **kw: f"ЛИМИТЫ={limits}"
+    project = make(script, [manifest])
+    project.store.apply([{"op": "add_card", "kind": "домен", "title": "Пациенты"}], HUMAN)
+    project.start("problem", auto={"targets": []})
+    wait_for(lambda: project.runs.get("problem"), ("finished",))
+    assert "ЛИМИТЫ={'n': 3}" in notes[0]
+    project.settings.data["auto_unlimited"] = True
+    project.start("problem", auto={"targets": []})
+    wait_for(lambda: project.runs.get("problem"), ("finished",))
+    assert "ЛИМИТЫ=None" in notes[1]

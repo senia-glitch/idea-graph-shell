@@ -12,11 +12,14 @@ function slotRow(key, label, hint, slot) {
     ? `<select data-f="model">${models.map((m) => `<option value="${esc(m.id)}" ${m.id === slot.model ? "selected" : ""}>${esc(m.name)}</option>`).join("")}` +
       (known || !slot.model ? "" : `<option selected value="${esc(slot.model)}">${esc(slot.model)}</option>`) + "</select>"
     : `<input data-f="model" value="${esc(slot.model || "")}" placeholder="провайдер/модель">`;
-  const efforts = agent?.efforts?.length ? agent.efforts : [""];
+  const model = models.find((m) => m.id === slot.model);
+  // у OpenCode усилие — вариант конкретной модели: у каждой свой набор (а у части его нет)
+  const own = model?.efforts ? ["", ...model.efforts] : null;
+  const efforts = own || (agent?.efforts?.length ? agent.efforts : [""]);
   return `<tr data-slot="${esc(key)}"><td><b>${esc(label)}</b><div class="hint">${esc(hint)}</div></td>
     <td><select data-f="agent">${agents.map((a) => `<option value="${a.id}" ${a.id === slot.agent ? "selected" : ""}>${esc(a.name)}${a.found ? "" : " — не найден"}</option>`).join("")}</select></td>
     <td>${modelField}</td>
-    <td><select data-f="effort">${efforts.map((e) => `<option value="${e}" ${e === (slot.effort || "") ? "selected" : ""}>${e || "по умолчанию"}</option>`).join("")}</select></td></tr>`;
+    <td><select data-f="effort">${efforts.map((e) => `<option value="${e}" ${e === (efforts.includes(slot.effort || "") ? (slot.effort || "") : "") ? "selected" : ""}>${e || "по умолчанию"}</option>`).join("")}</select></td></tr>`;
 }
 
 const KIND_NAMES = {agent: "скилл для агента", code: "без модели", decider: "решатель", view: "экран"};
@@ -43,6 +46,7 @@ export async function renderSettings() {
       `<label>${esc(l.name)}<input type="number" min="1" max="20" data-auto="${p.id}.${l.key}" value="${(st.auto_limits?.[p.id]?.[l.key]) ?? l.default}"></label>`).join("")).join("")}</div>` : ""}
     ${S.boot.packages.some((p) => p.research) ? `<h2>Исследование области</h2>
     <p class="hint">Три исследователя независимо ищут в сети и в ваших ресурсах реальные сценарии и проблемы области, основной агент опирается на их отчёты. Им нужен агент с веб-поиском (например, Claude Code); дайте им разные модели.</p>
+    <label class="check" title="Агент не будет упираться в число карточек, но создаёт только то, что подтверждено фактами и нужно по критериям этапа"><input type="checkbox" id="autoUnlimited" ${st.auto_unlimited ? "checked" : ""}> Не ограничивать автоматический режим по количеству карточек (агент делает только то, что подтверждено фактами, без работы ради работы)</label>
     <label class="check"><input type="checkbox" id="autoResearch" ${st.auto_research ? "checked" : ""}> В автоматическом режиме сначала исследовать область</label>
     <table class="slots"><thead><tr><th>Исследователь</th><th>Агент</th><th>Модель</th><th>Усилие</th></tr></thead><tbody>
       ${[0, 1, 2].map((i) => slotRow("researcher:" + i, "Исследователь " + (i + 1), "веб-поиск и ваши ресурсы", st.researchers[i])).join("")}
@@ -80,7 +84,7 @@ export async function renderSettings() {
       out.textContent = result.found ? "подключён: " + (result.version || "версия неизвестна") : "не найден";
     });
   });
-  page.querySelectorAll('select[data-f="agent"]').forEach((select) => {
+  page.querySelectorAll('select[data-f="agent"], select[data-f="model"]').forEach((select) => {
     select.onchange = () => { collect(); renderSettings(); };
   });
   $("saveSettings").onclick = () => act(async () => {
@@ -108,6 +112,7 @@ function collect() {
     slots: {}, deciders: [{...st.deciders[0]}, {...st.deciders[1]}], default_slot: {...st.default_slot},
     researchers: st.researchers.map((r) => ({...r})),
     auto_research: $("autoResearch") ? $("autoResearch").checked : st.auto_research,
+    auto_unlimited: $("autoUnlimited") ? $("autoUnlimited").checked : st.auto_unlimited,
     automation: $("aRounds") ? {rounds: +$("aRounds").value, fuse_decisions: +$("aFuse").value, fuse_cost: +$("aCost").value, important_dependents: +$("aImportant").value} : {...st.automation},
   };
   document.querySelectorAll("tr[data-slot]").forEach((row) => {
@@ -127,5 +132,6 @@ function collect() {
   st.auto_limits = patch.auto_limits;
   st.researchers = patch.researchers;
   st.auto_research = patch.auto_research;
+  st.auto_unlimited = patch.auto_unlimited;
   return patch;
 }

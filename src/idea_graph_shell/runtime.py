@@ -670,7 +670,8 @@ class Project:
         if run.autorun:
             spec = manifest["auto"]
             targets = [self.store.cards[i] for i in run.autorun["targets"] if i in self.store.cards]
-            parts.append(spec["note"](PackageContext(self, run.package), targets, self.settings.auto_limits(manifest),
+            limits = None if self.settings.data.get("auto_unlimited") else self.settings.auto_limits(manifest)
+            parts.append(spec["note"](PackageContext(self, run.package), targets, limits,
                                       only_research=bool(run.autorun.get("only_research"))))
         if run.deferred:
             parts.append("Отложенные до человека вопросы (не задавай их снова): "

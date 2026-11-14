@@ -31,6 +31,7 @@ DEFAULTS = {
         {"agent": "claude", "model": "sonnet", "effort": ""},
         {"agent": "claude", "model": "haiku", "effort": ""},
     ],
+    "auto_unlimited": False,           # не ограничивать автоматический режим числом карточек
     "auto_research": True,             # в автоматическом режиме сначала исследовать область
     "auto_limits": {},                 # id пакета -> {ключ лимита: число} для автоматического режима
     "projects_root": "",               # корневая папка проектов; пусто — «Документы\\Граф идеи»
@@ -75,11 +76,12 @@ class Settings:
 
     def update(self, patch: dict) -> dict:
         allowed = {k: v for k, v in (patch or {}).items()
-                   if k in ("slots", "default_slot", "deciders", "automation", "projects_root", "auto_limits", "researchers", "auto_research")}
+                   if k in ("slots", "default_slot", "deciders", "automation", "projects_root", "auto_limits", "researchers", "auto_research", "auto_unlimited")}
         deciders = allowed.get("deciders")
         researchers = allowed.pop("researchers", None)
-        if "auto_research" in allowed:
-            allowed["auto_research"] = bool(allowed["auto_research"])
+        for flag in ("auto_research", "auto_unlimited"):
+            if flag in allowed:
+                allowed[flag] = bool(allowed[flag])
         if "auto_limits" in allowed:
             clean: dict = {}
             for package, limits in (allowed["auto_limits"] or {}).items() if isinstance(allowed["auto_limits"], dict) else []:

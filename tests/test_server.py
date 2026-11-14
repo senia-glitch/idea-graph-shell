@@ -168,3 +168,9 @@ def test_resources_api_and_researcher_settings(served, tmp_path):
     assert data["settings"]["researchers"][1] == {"agent": "opencode", "model": "x/y", "effort": ""}
     http(served, "/api/settings", {"researchers": [{"agent": "claude"}]})                     # неверная длина — игнор
     assert len(served.settings.data["researchers"]) == 3
+
+
+def test_unlimited_flag_reaches_the_note(served, tmp_path):
+    assert served.settings.data["auto_unlimited"] is False
+    code, data = http(served, "/api/settings", {"auto_unlimited": 1})
+    assert code == 200 and data["settings"]["auto_unlimited"] is True
