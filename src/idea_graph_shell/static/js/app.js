@@ -59,7 +59,7 @@ function renderWelcome() {
     <h2>Проекты</h2>
     <p class="hint">Корневая папка проектов: <b>${esc(root)}</b>. <a href="#" id="toSettings">Изменить в настройках</a></p>
     ${projects.length
-      ? `<div class="recent">${projects.map((p) => `<a href="#" data-folder="${esc(p.folder)}"><b>${esc(p.title)}</b><span class="hint"> · ${esc(p.folder)}</span></a>`).join("")}</div>`
+      ? `<div class="recent">${projects.map((p) => `<a href="#" data-folder="${esc(p.folder)}"><b>${esc(p.title)}</b><span class="hint">${esc(p.folder)}</span></a>`).join("")}</div>`
       : '<div class="hint">В корневой папке пока нет проектов. Создайте первый ниже.</div>'}
     <h2>Новый проект</h2>
     <p class="hint">Работа начинается с проблемы: в новом проекте вы сами напишете первый домен — кто испытывает проблему.</p>

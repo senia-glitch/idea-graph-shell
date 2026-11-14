@@ -71,7 +71,7 @@ function setFieldValue(card, field, value) {
 function renderNode(card) {
   const agent = card.author !== "human";
   return `<div class="hd" style="--c:${kindColor(card.kind)}"><span class="grip" title="Перетащить карточку вместе с её веткой">⠿</span>` +
-    `<span class="chip">${esc(card.kind)}</span>` +
+    `<span class="chip kind">${esc(card.kind)}</span>` +
     (agent ? `<span class="chip agent" title="Создал ${esc(authorName(card.author))}">агент</span>` : "") +
     (card.status === "proposed" ? '<span class="chip todo">предложена</span>' : "") +
     `<span class="t" title="${esc(card.title)}">${esc(card.title)}</span>` +
@@ -126,7 +126,7 @@ export function initGraph() {
     childrenOf: (id) => G.children.get(id) || [],
     edgeColor: (edge) => EDGE_COLORS[edge.kind] || (edge.kind === DETAIL ? "#9a9aa2" : "#5aa0ff"),
     edgeDashed: (edge) => edge.kind !== DETAIL,
-    edgeLabel: (edge) => edge.kind,
+    edgeLabel: (edge) => (edge.kind === DETAIL ? "" : edge.kind),
     onZoom: (percent) => { $("zoomLabel").textContent = percent + "%"; },
     onView: scheduleLayoutSave,
     onMoved: scheduleLayoutSave,

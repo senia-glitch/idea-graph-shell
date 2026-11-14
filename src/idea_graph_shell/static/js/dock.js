@@ -3,7 +3,7 @@
 import {$, S, act, api, authorName, emit, esc, on, packageName, toast, when} from "./core.js";
 import {graphIndex, loadGraph} from "./graph.js";
 
-const D = {resources: null, autoTarget: "", tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}, picked: {}};
+const D = {autoOpen: false, resources: null, autoTarget: "", tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}, picked: {}};
 
 const STATUS_TEXT = {
   idle: "ждёт", running: "думает…", asking: "ждёт вашего ответа", deciding: "решатель думает…",
@@ -62,10 +62,11 @@ export function initDock() {
     <div class="dock-tabs" id="dockTabs"></div>
     <div class="dock-body" id="dockBody"></div>
     <form class="chat-form" id="chatForm">
-      <textarea id="chatInput" rows="2" placeholder="Сообщение пакету… (Enter — отправить, Shift+Enter — новая строка)"></textarea>
+      <textarea id="chatInput" rows="2" placeholder="Сообщение агенту… (Enter — отправить)"></textarea>
       <button class="primary" title="Отправить">➤</button>
     </form>`;
   initDockResize();
+  $("pkgCtl").addEventListener("toggle", (e) => { if (e.target.matches("[data-auto-box]")) D.autoOpen = e.target.open; }, true);
   $("pkgBar").onclick = (e) => {
     const id = e.target.closest("[data-pkg]")?.dataset.pkg;
     if (id) { S.pkg = id; renderDock(); }
@@ -115,11 +116,14 @@ function autoRow(pkg, busy) {
   if (D.autoTarget && !targets.some((c) => c.id === D.autoTarget)) D.autoTarget = "";
   const options = [`<option value="">все (${targets.length})</option>`,
     ...targets.map((c) => `<option value="${c.id}"${D.autoTarget === c.id ? " selected" : ""}>${esc(c.title.slice(0, 60))}</option>`)].join("");
-  return `<div class="ctl-row"><span class="hint" title="Агент без вопросов достроит ветку до результата в пределах лимитов из настроек. Карточки останутся предложенными: примите и поправьте их на графе">Автоматически:</span>
-      <select data-auto-target ${targets.length ? "" : "disabled"} title="Для какой карточки «${esc(pkg.auto.targets)}» запустить">${options}</select>
+  return `<details class="auto-box" data-auto-box${D.autoOpen || !targets.length ? " open" : ""}>
+    <summary title="Агент без вопросов достроит ветку до результата в пределах лимитов из настроек. Карточки останутся предложенными: примите и поправьте их на графе">Автоматический режим</summary>
+    <select data-auto-target ${targets.length ? "" : "disabled"} title="Для какой карточки «${esc(pkg.auto.targets)}» запустить">${options}</select>
+    <div class="auto-actions">
       <button data-do="auto" ${targets.length && !busy ? "" : "disabled"} title="Исследование области (если включено в настройках), затем ветка до результатов">⚡ Авто</button>
       ${pkg.research ? `<button data-do="research" ${targets.length && !busy ? "" : "disabled"} title="Три исследователя на разных моделях найдут реальные сценарии и проблемы области; агент создаст из них карточки со ссылками на источники">🔎 Исследовать</button>` : ""}</div>
-    ${targets.length ? "" : `<div class="hint">Автоматический режим требует хотя бы одну карточку «${esc(pkg.auto.targets)}»: нажмите «+ Домен» вверху.</div>`}`;
+    ${targets.length ? "" : `<div class="hint">Нужна хотя бы одна карточка «${esc(pkg.auto.targets)}»: нажмите «+ Домен» вверху.</div>`}
+  </details>`;
 }
 
 function renderControls() {
