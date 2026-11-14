@@ -267,6 +267,10 @@ class OpenCodeAdapter(Adapter):
             pos = end
             if not isinstance(data, dict) or data.get("status", "active") != "active":
                 continue
+            # Веб-поиск OpenCode даёт провайдеру opencode-go целиком, а вызвать его (и наши инструменты) может
+            # только модель с вызовом инструментов: остальные исследователю и агенту не подходят.
+            if (data.get("capabilities") or {}).get("toolcall") is False:
+                continue
             variants = [v for v in (data.get("variants") or {}) if isinstance(v, str)]
             title = str(data.get("name") or found.group(1).split("/", 1)[1])
             models.append({"id": found.group(1), "name": f"{title} ({found.group(1).split('/', 1)[1]})",

@@ -10,6 +10,8 @@ VERBOSE = "\n".join([
     json.dumps({"id": "mimo-v2.5", "name": "MiMo V2.5", "status": "active", "variants": {}}, indent=2),
     "opencode-go/old-model",
     json.dumps({"id": "old-model", "name": "Old", "status": "deprecated", "variants": {"low": {}}}, indent=2),
+    "opencode-go/no-tools",
+    json.dumps({"id": "no-tools", "name": "NoTools", "status": "active", "capabilities": {"toolcall": False}}, indent=2),
     "opencode-go/glm-5.3",
     json.dumps({"id": "glm-5.3", "name": "GLM-5.3", "status": "active", "variants": {"low": {}, "high": {}, "max": {}}}, indent=2),
 ])
