@@ -1,5 +1,7 @@
 """Работа пакета: ходы, вопросы, ответы человека и решателя, предохранитель."""
 
+import json
+
 import pytest
 from conftest import wait_for
 
@@ -286,7 +288,8 @@ def auto_manifest():
     return {"id": "problem", "name": "Проблема", "kind": "agent", "skill": "Строй ветку.", "asks": True,
             "outcomes": ["готово"],
             "auto": {"targets": "домен", "limits": [{"key": "n", "name": "Сколько", "default": 3}],
-                     "note": lambda ctx, targets, limits: "АВТО: " + ",".join(c["id"] for c in targets) + f" n={limits['n']}"}}
+                     "note": lambda ctx, targets, limits, **kw: "АВТО: " + ",".join(c["id"] for c in targets) + f" n={limits['n']}"
+                     + (" ТОЛЬКО-ИССЛЕДОВАНИЕ" if kw.get("only_research") else "")}}
 
 
 def test_auto_mode_needs_a_target_card(make):
@@ -326,7 +329,7 @@ def test_auto_mode_has_no_questions_and_runs_until_finish(make):
     assert "АВТО: c2 n=5" in seen["turns"][0] and "Продолжай и заверши" in seen["turns"][1]
     card = project.store.cards["c3"]
     assert card["status"] == "proposed" and card["author"] == "package:problem"
-    assert project.runs["problem"].public()["auto"] == {"targets": ["c2"]}
+    assert project.runs["problem"].public()["auto"] == {"targets": ["c2"], "research": False, "only_research": False}
 
 
 def test_normal_start_after_auto_has_questions_again(make):
@@ -341,3 +344,99 @@ def test_normal_start_after_auto_has_questions_again(make):
     project.start("problem")
     run = wait_for(lambda: project.runs.get("problem"), ("finished",))
     assert run.autorun is None
+
+
+def research_manifest():
+    manifest = auto_manifest()
+    manifest["research"] = {
+        "skill": "Исследуй область.",
+        "note": lambda ctx, target, materials, index: f"ИССЛ {index} {target['id']} материалов={len(materials)}",
+        "merge": lambda ctx, found: "СВОДКА: " + "; ".join(f"{t['id']}:{len(r)}:{r[0]['who']}" for t, r in found),
+    }
+    return manifest
+
+
+def three_script_researchers(project):
+    project.settings.data["researchers"] = [{"agent": "script", "model": f"m{i}", "effort": ""} for i in range(3)]
+
+
+def test_research_runs_three_researchers_and_feeds_main_agent(make, tmp_path):
+    seen = {"main": [], "researchers": [], "web": []}
+
+    def script(note, call, request):
+        if note.startswith("ИССЛ"):
+            seen["researchers"].append(note)
+            seen["web"].append(request.web_search)
+            assert call("turn_info") == note
+            assert call("graph_read").startswith("ОТКАЗ") or True        # граф исследователю не нужен
+            assert call("graph_apply", ops=[]).startswith("ОТКАЗ unknown_tool")
+            call("report", scenarios=[{"title": "Утром записаться", "sources": ["https://a.example"]}],
+                 problems=[{"scenario": "Утром записаться", "title": "Не дозвониться", "sources": []}], summary="ок")
+            assert call("report", scenarios=[{"title": "ещё"}]).startswith("ОТКАЗ one_report")
+            return ""
+        seen["main"].append(note)
+        call("finish", outcome="готово", summary="достроено")
+        return ""
+
+    project = make(script, [research_manifest()])
+    three_script_researchers(project)
+    (project.dir / "resources.json").write_text('{"next": 2, "items": []}', encoding="utf-8")
+    project.store.apply([{"op": "add_card", "kind": "домен", "title": "Пациенты"}], HUMAN)
+    project.start("problem", auto={"targets": []})
+    run = wait_for(lambda: project.runs.get("problem"), ("finished",))
+    assert run.outcome == "готово" and sorted(n.split()[1] for n in seen["researchers"]) == ["0", "1", "2"]
+    assert all(seen["web"]) and len(seen["main"]) == 1
+    assert "СВОДКА: c2:3:исследователь 1 (script/m0)" in seen["main"][0] and "АВТО: c2" in seen["main"][0]
+    assert "ТОЛЬКО-ИССЛЕДОВАНИЕ" not in seen["main"][0]
+    saved = json.loads((project.dir / "packages" / "problem.json").read_text(encoding="utf-8"))
+    assert len(saved["research"]["c2"]["reports"]) == 3 and run.cost > 0
+    assert run.autorun == {"targets": ["c2"], "research": True, "only_research": False}
+
+
+def test_research_only_button_mode_and_switch_off(make):
+    notes = []
+
+    def script(note, call, request):
+        if note.startswith("ИССЛ"):
+            call("report", scenarios=[{"title": "С", "sources": ["u"]}])
+            return ""
+        notes.append(note)
+        call("finish", outcome="готово", summary="ок")
+        return ""
+
+    project = make(script, [research_manifest()])
+    three_script_researchers(project)
+    project.store.apply([{"op": "add_card", "kind": "домен", "title": "Пациенты"}], HUMAN)
+    project.start("problem", auto={"targets": [], "only_research": True})
+    run = wait_for(lambda: project.runs.get("problem"), ("finished",))
+    assert "ТОЛЬКО-ИССЛЕДОВАНИЕ" in notes[0] and "СВОДКА" in notes[0]
+    assert run.autorun["only_research"] is True
+    project.settings.data["auto_research"] = False                       # исследование в авто можно отключить
+    project.start("problem", auto={"targets": []})
+    wait_for(lambda: project.runs.get("problem"), ("finished",))
+    assert "СВОДКА" not in notes[1] and project.runs["problem"].autorun["research"] is False
+
+
+def test_research_fails_when_nobody_reports_and_status_is_researching(make):
+    statuses = []
+
+    def script(note, call, request):
+        if note.startswith("ИССЛ"):
+            statuses.append(project.runs["problem"].status)
+            return ""                                                     # отчёта нет
+        raise AssertionError("основной агент не должен запускаться без исследования")
+
+    project = make(script, [research_manifest()])
+    three_script_researchers(project)
+    project.store.apply([{"op": "add_card", "kind": "домен", "title": "Пациенты"}], HUMAN)
+    project.start("problem", auto={"targets": []})
+    run = wait_for(lambda: project.runs.get("problem"), ("error",))
+    assert "не вернули результатов" in run.error and set(statuses) == {"researching"}
+
+
+def test_research_needs_package_support(make):
+    project = make(lambda note, call, request: "", [auto_manifest()])
+    project.store.apply([{"op": "add_card", "kind": "домен", "title": "Пациенты"}], HUMAN)
+    with pytest.raises(ShellError) as info:
+        project.start("problem", auto={"targets": [], "only_research": True})
+    assert info.value.code == "no_research"

@@ -159,3 +159,43 @@ DECIDER_TOOLS = [
         },
     },
 ]
+
+RESEARCHER_RULES = """
+# Как ты работаешь в оболочке
+
+Ты исследователь. Граф проекта ты не видишь и не меняешь. Вызови `turn_info`: там область и материалы
+пользователя. Ищи в сети и в этих материалах, затем отправь результат ровно одним вызовом `report`.
+Не пиши результат обычным текстом: считается только `report`. Пиши по-русски, коротко и конкретно.
+""".strip()
+
+_SOURCES = {"type": "array", "items": {"type": "string"},
+            "description": "Адреса страниц или названия материалов пользователя, откуда взято. Без источника не включай"}
+
+RESEARCH_TOOLS = [
+    {
+        "name": "turn_info",
+        "description": "Область, которую нужно исследовать, и материалы пользователя. Вызови первым делом.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "report",
+        "description": "Отправить результат исследования. Вызывается ровно один раз в конце работы.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scenarios": {"type": "array", "description": "Реально существующие сценарии в области",
+                              "items": {"type": "object", "properties": {
+                                  "title": {"type": "string", "description": "Ситуация одной строкой"},
+                                  "description": {"type": "string"}, "sources": _SOURCES},
+                                  "required": ["title", "sources"]}},
+                "problems": {"type": "array", "description": "Реальные проблемы людей в рамках этих сценариев",
+                             "items": {"type": "object", "properties": {
+                                 "scenario": {"type": "string", "description": "Название сценария, к которому относится"},
+                                 "title": {"type": "string", "description": "Затруднение одной строкой"},
+                                 "description": {"type": "string"}, "sources": _SOURCES},
+                                 "required": ["scenario", "title", "sources"]}},
+                "summary": {"type": "string", "description": "Что искал и насколько надёжны находки, две-три строки"},
+            },
+        },
+    },
+]

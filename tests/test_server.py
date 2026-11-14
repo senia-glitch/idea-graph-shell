@@ -147,3 +147,24 @@ def test_auto_mode_public_manifest_and_limits(served):
     code, data = http(served, "/api/settings", {"auto_limits": {"problem": {"n": 99, "x": "zz"}}})
     assert code == 200 and data["settings"]["auto_limits"] == {"problem": {"n": 20}}
     assert served.settings.auto_limits(served.registry.get("problem")) == {"n": 20}
+
+
+def test_resources_api_and_researcher_settings(served, tmp_path):
+    create_project(served, tmp_path)
+    note = tmp_path / "заметки.txt"
+    note.write_text("Пациенты ждут по часу", encoding="utf-8")
+    code, data = http(served, "/api/resources/add", {"value": str(note)})
+    assert code == 200 and data["item"]["id"] == "r1"
+    assert http(served, "/api/resources")[1]["items"][0]["value"] == str(note)
+    code, error = http(served, "/api/resources/add", {"value": str(tmp_path / "нет.txt")})
+    assert code == 400 and error["error"] == "bad_resource"
+    assert http(served, "/api/resources/remove", {"id": "r1"})[0] == 200
+    assert http(served, "/api/resources")[1]["items"] == []
+    d = served.settings.data
+    assert len(d["researchers"]) == 3 and d["auto_research"] is True
+    code, data = http(served, "/api/settings", {"auto_research": False, "researchers": [
+        {"agent": "claude", "model": "opus"}, {"agent": "opencode", "model": "x/y"}, {"agent": "claude", "model": "haiku"}]})
+    assert code == 200 and data["settings"]["auto_research"] is False
+    assert data["settings"]["researchers"][1] == {"agent": "opencode", "model": "x/y", "effort": ""}
+    http(served, "/api/settings", {"researchers": [{"agent": "claude"}]})                     # неверная длина — игнор
+    assert len(served.settings.data["researchers"]) == 3

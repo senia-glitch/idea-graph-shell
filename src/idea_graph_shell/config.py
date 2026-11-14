@@ -26,6 +26,12 @@ DEFAULTS = {
         "important_dependents": 3,     # вопрос важный, если от его карточки зависит столько карточек
     },
     "recent": [],
+    "researchers": [                   # три исследователя области: им стоит дать разные модели
+        {"agent": "claude", "model": "opus", "effort": ""},
+        {"agent": "claude", "model": "sonnet", "effort": ""},
+        {"agent": "claude", "model": "haiku", "effort": ""},
+    ],
+    "auto_research": True,             # в автоматическом режиме сначала исследовать область
     "auto_limits": {},                 # id пакета -> {ключ лимита: число} для автоматического режима
     "projects_root": "",               # корневая папка проектов; пусто — «Документы\\Граф идеи»
 }
@@ -69,8 +75,11 @@ class Settings:
 
     def update(self, patch: dict) -> dict:
         allowed = {k: v for k, v in (patch or {}).items()
-                   if k in ("slots", "default_slot", "deciders", "automation", "projects_root", "auto_limits")}
+                   if k in ("slots", "default_slot", "deciders", "automation", "projects_root", "auto_limits", "researchers", "auto_research")}
         deciders = allowed.get("deciders")
+        researchers = allowed.pop("researchers", None)
+        if "auto_research" in allowed:
+            allowed["auto_research"] = bool(allowed["auto_research"])
         if "auto_limits" in allowed:
             clean: dict = {}
             for package, limits in (allowed["auto_limits"] or {}).items() if isinstance(allowed["auto_limits"], dict) else []:
@@ -85,6 +94,11 @@ class Settings:
             self.data["deciders"] = [
                 {"agent": str(d.get("agent") or ""), "model": str(d.get("model") or ""),
                  "effort": str(d.get("effort") or "")} for d in deciders
+            ]
+        if isinstance(researchers, list) and len(researchers) == 3:
+            self.data["researchers"] = [
+                {"agent": str(d.get("agent") or ""), "model": str(d.get("model") or ""),
+                 "effort": str(d.get("effort") or "")} for d in researchers
             ]
         self.save()
         return self.data

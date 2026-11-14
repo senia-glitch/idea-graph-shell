@@ -92,5 +92,6 @@ class Registry:
             auto = m.get("auto")
             if isinstance(auto, dict):          # функцию-«вводные» наружу не отдаём
                 item["auto"] = {"targets": auto.get("targets"), "limits": list(auto.get("limits") or [])}
+            item["research"] = isinstance(m.get("research"), dict)
             out.append(item)
         return out

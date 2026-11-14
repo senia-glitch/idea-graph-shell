@@ -178,3 +178,5 @@ table.slots td{padding:6px;border-top:1px solid #3a3b40;vertical-align:top}
 .dock-resize{position:absolute;left:-3px;top:0;bottom:0;width:7px;cursor:col-resize;z-index:30}
 .dock-resize:hover,.dock-resize.drag{background:var(--acc);opacity:.55}
 @media (max-width:1100px){.dock{width:330px}.inspector{width:260px}}
+
+label.check{display:flex;gap:8px;align-items:center;margin:8px 0}

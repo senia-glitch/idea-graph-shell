@@ -3,11 +3,11 @@
 import {$, S, act, api, authorName, emit, esc, on, packageName, toast, when} from "./core.js";
 import {graphIndex, loadGraph} from "./graph.js";
 
-const D = {autoTarget: "", tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}, picked: {}};
+const D = {resources: null, autoTarget: "", tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}, picked: {}};
 
 const STATUS_TEXT = {
   idle: "ждёт", running: "думает…", asking: "ждёт вашего ответа", deciding: "решатель думает…",
-  finished: "закончил", error: "ошибка", stopped: "остановлен", paused: "на паузе",
+  finished: "закончил", error: "ошибка", stopped: "остановлен", paused: "на паузе", researching: "исследуют область…",
 };
 
 /* Перерисовываем блок, только если он изменился: иначе кнопка может исчезнуть под курсором посреди щелчка. */
@@ -72,7 +72,7 @@ export function initDock() {
   };
   $("dockTabs").onclick = (e) => {
     const tab = e.target.dataset.tab;
-    if (tab) { D.tab = tab; renderDock(); }
+    if (tab) { D.tab = tab; $("dockBody").dataset.fresh = ""; renderDock(); }
   };
   $("chatForm").onsubmit = (e) => { e.preventDefault(); sendMessage(); };
   $("chatInput").addEventListener("keydown", (e) => {
@@ -104,7 +104,7 @@ export function renderDock() {
   renderControls();
   const questions = openQuestions().length;
   const decided = decisionCards().filter((c) => c.decision.by !== "human").length;
-  setHtml($("dockTabs"), [["chat", "Чат" + (questions ? ` · ${questions} ?` : "")], ["decisions", "Решения агента" + (decided ? ` · ${decided}` : "")], ["history", "История"]]
+  setHtml($("dockTabs"), [["chat", "Чат" + (questions ? ` · ${questions} ?` : "")], ["decisions", "Решения агента" + (decided ? ` · ${decided}` : "")], ...(S.boot.packages.some((p) => p.research) ? [["resources", "Ресурсы" + (D.resources ? ` · ${D.resources.length}` : "")]] : []), ["history", "История"]]
     .map(([id, name]) => `<button data-tab="${id}" class="${D.tab === id ? "on" : ""}">${name}</button>`).join(""));
   $("chatForm").hidden = D.tab !== "chat";
   renderBody();
@@ -117,7 +117,8 @@ function autoRow(pkg, busy) {
     ...targets.map((c) => `<option value="${c.id}"${D.autoTarget === c.id ? " selected" : ""}>${esc(c.title.slice(0, 60))}</option>`)].join("");
   return `<div class="ctl-row"><span class="hint" title="Агент без вопросов достроит ветку до результата в пределах лимитов из настроек. Карточки останутся предложенными: примите и поправьте их на графе">Автоматически:</span>
       <select data-auto-target ${targets.length ? "" : "disabled"} title="Для какой карточки «${esc(pkg.auto.targets)}» запустить">${options}</select>
-      <button data-do="auto" ${targets.length && !busy ? "" : "disabled"}>⚡ Авто</button></div>
+      <button data-do="auto" ${targets.length && !busy ? "" : "disabled"} title="Исследование области (если включено в настройках), затем ветка до результатов">⚡ Авто</button>
+      ${pkg.research ? `<button data-do="research" ${targets.length && !busy ? "" : "disabled"} title="Три исследователя на разных моделях найдут реальные сценарии и проблемы области; агент создаст из них карточки со ссылками на источники">🔎 Исследовать</button>` : ""}</div>
     ${targets.length ? "" : `<div class="hint">Автоматический режим требует хотя бы одну карточку «${esc(pkg.auto.targets)}»: нажмите «+ Домен» вверху.</div>`}`;
 }
 
@@ -125,7 +126,7 @@ function renderControls() {
   const box = $("pkgCtl"), pkg = S.boot.packages.find((p) => p.id === S.pkg);
   if (!pkg) { setHtml(box, ""); return; }
   const run = runOf(pkg.id), status = run?.status || "idle";
-  const busy = status === "running" || status === "deciding";
+  const busy = status === "running" || status === "deciding" || status === "researching";
   const answerer = S.project.answerers[pkg.id] || "human";
   const started = run && run.turn > 0;
   setHtml(box, `
@@ -149,6 +150,7 @@ function renderControls() {
     const todo = e.target.dataset.do, who = e.target.dataset.who;
     if (todo === "start") act(async () => { await api("/api/run/start", {package: pkg.id}); emit("poll"); });
     if (todo === "auto") act(async () => { await api("/api/run/start", {package: pkg.id, auto: {targets: D.autoTarget ? [D.autoTarget] : []}}); emit("poll"); });
+    if (todo === "research") act(async () => { await api("/api/run/start", {package: pkg.id, auto: {targets: D.autoTarget ? [D.autoTarget] : [], only_research: true}}); emit("poll"); });
     if (todo === "fresh") act(async () => { await api("/api/run/start", {package: pkg.id, fresh: true}); emit("poll"); });
     if (todo === "stop") act(async () => { await api("/api/run/stop", {package: pkg.id}); emit("poll"); });
     if (todo === "resume") act(async () => { await api("/api/run/resume", {package: pkg.id}); emit("poll"); });
@@ -253,6 +255,7 @@ function renderBody() {
   const body = $("dockBody");
   if (D.tab === "chat") return renderChat(body);
   if (D.tab === "decisions") return renderDecisions(body);
+  if (D.tab === "resources") return renderResources(body);
   return renderHistory(body);
 }
 
@@ -263,19 +266,48 @@ function renderChat(body) {
   if (body.dataset.sig === signature && body.dataset.tab === "chat") return;
   if (typing && body.dataset.tab === "chat" && JSON.stringify(questions.map((q) => q.id)) === body.dataset.qs) return;   // не сбиваем ввод своего ответа
   const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 60 || body.dataset.tab !== "chat";
-  const busy = Object.values(S.project.runs).filter((r) => r.status === "running" || r.status === "deciding");
+  const busy = Object.values(S.project.runs).filter((r) => r.status === "running" || r.status === "deciding" || r.status === "researching");
   body.onclick = null;
   body.dataset.sig = signature;
   body.dataset.tab = "chat";
   body.dataset.qs = JSON.stringify(questions.map((q) => q.id));
   body.innerHTML =
     (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).map(chatLine).join("") : '<div class="empty">Нажмите «+ Домен» вверху и напишите, кто испытывает проблему. Затем «▶ Запустить»: агент будет задавать вопросы с готовыми вариантами ответа, а ваши ответы превращать в карточки: домен → сценарий → проблема → результат.</div>') +
-    busy.map((r) => `<div class="thinking">${esc(packageName(r.package))}: ${r.status === "deciding" ? "решатель думает" : "агент думает"}<span class="dots"></span></div>`).join("") +
+    busy.map((r) => `<div class="thinking">${esc(packageName(r.package))}: ${r.status === "deciding" ? "решатель думает" : r.status === "researching" ? "исследователи ищут информацию" : "агент думает"}<span class="dots"></span></div>`).join("") +
     questions.map(questionHtml).join("");
   bindQuestions(body);
   if (stick) body.scrollTop = body.scrollHeight;
   const current = questions.find((q) => !q.deferred) || questions[0];
   emit("highlight", current ? (current.cards || []).concat(current.revisits || []) : []);
+}
+
+async function renderResources(body) {
+  if (body.dataset.tab === "resources" && D.resources && body.dataset.fresh === "1") return;   // не стираем ввод ссылки
+  body.dataset.tab = "resources";
+  body.dataset.sig = "";
+  if (!D.resources) {
+    const data = await act(() => api("/api/resources"));
+    if (!data) return;
+    D.resources = data.items;
+    if (D.tab !== "resources") return;
+  }
+  body.dataset.fresh = "1";
+  body.innerHTML = `<div class="hint">Ссылки и текстовые файлы, из которых исследователи берут материал вместе со своим веб-поиском (форумы, отчёты, статьи, ваши заметки). Страница или файл читаются сразу при добавлении.</div>
+    <form id="resForm" class="chat-form" style="margin:8px 0"><input name="value" placeholder="https://… или путь к файлу (.txt, .md, .html, .csv)" autocomplete="off" style="flex:1;min-width:0">
+      <button class="primary">Добавить</button></form>` +
+    (D.resources.map((r) => `<div class="hist"><div><span class="chip">${r.kind === "url" ? "ссылка" : "файл"}</span> <b style="word-break:break-all">${esc(r.value)}</b></div>
+      <div class="hint">прочитано символов: ${r.chars} <button data-rm="${r.id}">Убрать</button></div></div>`).join("")
+      || '<div class="empty">Ресурсов пока нет: исследователи будут искать только в сети.</div>');
+  const refresh = () => { D.resources = null; body.dataset.fresh = ""; renderBody(); };
+  $("resForm").onsubmit = (e) => {
+    e.preventDefault();
+    const value = new FormData(e.currentTarget).get("value").trim();
+    if (value) act(async () => { await api("/api/resources/add", {value}); toast("Ресурс прочитан и добавлен"); refresh(); });
+  };
+  body.onclick = (e) => {
+    const id = e.target.dataset.rm;
+    if (id) act(async () => { await api("/api/resources/remove", {id}); refresh(); });
+  };
 }
 
 function renderDecisions(body) {
@@ -322,7 +354,7 @@ async function renderHistory(body) {
       <div class="mhead"><b>#${e.rev} · ${esc(e.author_name)}</b><span class="hint">${when(e.ts)}</span></div>
       ${e.note ? `<div class="hint">${esc(e.note)}</div>` : ""}
       ${e.lines.slice(0, 6).map((l) => `<div>${esc(l)}</div>`).join("")}${e.lines.length > 6 ? `<div class="hint">…и ещё ${e.lines.length - 6}</div>` : ""}
-      ${e.undone ? '<div class="hint">отменено</div>' : e.rev > 1 && !e.undo_of ? `<button data-undo="${e.rev}">Отменить</button>` : ""}</div>`).join("");
+      ${e.undone ? '<div class="hint">отменено</div>' : !e.undo_of ? `<button data-undo="${e.rev}">Отменить</button>` : ""}</div>`).join("");
   body.onclick = (e) => {
     const rev = e.target.dataset.undo;
     if (rev) act(async () => { await api("/api/undo", {rev: Number(rev)}); await loadGraph(); D.historyRev = -1; emit("poll"); toast("Готово"); });

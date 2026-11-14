@@ -18,6 +18,7 @@ from idea_graph_core import GraphError, Store, author_name, views
 
 from .agents import Adapters
 from .config import Settings
+from . import resources
 from .packages import Registry
 from .runtime import Project, ShellError
 
@@ -152,6 +153,8 @@ class App:
             return self.history()
         if path == "/api/agents":
             return self.agents()
+        if path == "/api/resources":
+            return {"items": resources.load(self.need().dir)["items"]}
         if path == "/api/card-history":
             project = self.need()
             return {"items": project.store.card_history(query.get("id", [""])[0])}
@@ -171,6 +174,17 @@ class App:
             version = adapter.version()
             return {"found": bool(adapter.found()), "version": version, "path": adapter.found()}
         project = self.need()
+        if path == "/api/resources/add":
+            try:
+                return {"item": resources.add(project.dir, str(data.get("value") or ""))}
+            except resources.ResourceError as error:
+                raise ShellError("bad_resource", str(error)) from None
+        if path == "/api/resources/remove":
+            try:
+                resources.remove(project.dir, str(data.get("id") or ""))
+            except resources.ResourceError as error:
+                raise ShellError("bad_resource", str(error)) from None
+            return {"ok": True}
         if path == "/api/ops":
             return project.human_ops(data.get("ops"), str(data.get("note") or ""))
         if path == "/api/layout":

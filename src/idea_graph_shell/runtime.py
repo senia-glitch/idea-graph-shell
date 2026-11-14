@@ -18,6 +18,7 @@ import os
 import secrets
 import threading
 import time
+import types
 from pathlib import Path
 
 from idea_graph_core import HUMAN, GraphError, Store, author_name, views
@@ -25,9 +26,10 @@ from idea_graph_core import HUMAN, GraphError, Store, author_name, views
 from .agents import Adapters, TurnRequest, TurnResult
 from .config import Settings
 from .packages import Registry
-from .tools import COMMON_RULES, DECIDER_RULES, DECIDER_TOOLS, PACKAGE_TOOLS
+from . import resources
+from .tools import COMMON_RULES, DECIDER_RULES, DECIDER_TOOLS, PACKAGE_TOOLS, RESEARCHER_RULES, RESEARCH_TOOLS
 
-BUSY = ("running", "deciding")
+BUSY = ("running", "deciding", "researching")
 WAITING = ("asking", "paused")
 CHAT_KEEP = 400
 
@@ -97,6 +99,7 @@ class Run:
         self.thread: threading.Thread | None = None
         self.proc = None
         self.stop_flag = False
+        self.research_holders: list = []    # запущенные исследователи: их можно остановить
         self.asked_this_turn = False
         self.note = ""
 
@@ -263,7 +266,14 @@ class Project:
             if not targets:
                 raise ShellError("no_target", f"Автоматический режим требует хотя бы одну карточку «{spec['targets']}»: "
                                               "напишите её вручную")
-            auto_info = {"targets": [c["id"] for c in targets]}
+            only = bool(auto.get("only_research"))
+            want = auto.get("research")
+            want = bool(self.settings.data.get("auto_research", True)) if want is None else bool(want)
+            if (only or want) and not isinstance(manifest.get("research"), dict):
+                if only:
+                    raise ShellError("no_research", f"У пакета «{manifest['name']}» нет исследования")
+                want = False
+            auto_info = {"targets": [c["id"] for c in targets], "research": want or only, "only_research": only}
             fresh = True
         with self.lock:
             run = self.runs.get(package_id)
@@ -290,7 +300,10 @@ class Project:
                                  else "Человек попросил продолжить работу.")
             run.status = "running"
             self._touch(run)
-        self.say("system", f"Запущен пакет «{manifest['name']}»", package_id, "start")
+        self.say("system", f"Запущен пакет «{manifest['name']}»" + (
+            " (автоматически, с исследованием области)" if auto_info and auto_info["research"] and not auto_info["only_research"]
+            else " (исследование области)" if auto_info and auto_info["only_research"]
+            else " (автоматически)" if auto_info else ""), package_id, "start")
         target = self._work if manifest["kind"] == "agent" else self._run_code
         self._spawn(run, target, prepare=manifest["kind"] == "agent")
         return run.public()
@@ -327,11 +340,12 @@ class Project:
             if run.status not in BUSY:
                 run.status = "stopped"
                 self._touch(run)
-        if proc is not None:
-            try:
-                proc.kill()
-            except OSError:
-                pass
+        for holder in [types.SimpleNamespace(proc=proc), *list(run.research_holders)]:
+            if getattr(holder, "proc", None) is not None:
+                try:
+                    holder.proc.kill()
+                except OSError:
+                    pass
         return run.public()
 
     def wait(self, package_id: str, timeout: float | None = None) -> dict:
@@ -381,6 +395,12 @@ class Project:
             if text:
                 with self.lock:
                     run.inbox.append(str(text))
+        if prepare and run.autorun and run.autorun.get("research"):
+            text = self._research(run, manifest)
+            if text is None:
+                return
+            with self.lock:
+                run.inbox.append(text)
         retried = False
         while True:
             with self.lock:
@@ -483,6 +503,121 @@ class Project:
                     self.say("system", "Автоматический режим остановлен: агент не завершил работу за "
                              f"{AUTO_MAX_TURNS + 1} хода. Запустите ещё раз, чтобы продолжить.", run.package, "pause")
 
+    # ------------------------------------------------------------------ исследование области
+
+    def _research(self, run: Run, manifest: dict) -> str | None:
+        """Три исследователя на разных моделях ищут реальные сценарии и проблемы; возвращает вводные для основного агента."""
+        spec = manifest["research"]
+        targets = [self.store.cards[i] for i in run.autorun["targets"] if i in self.store.cards]
+        materials, problems = resources.texts(self.dir)
+        for message in problems:
+            self.say("system", f"Ресурс не прочитан: {message}", run.package, "error")
+        slots = self.settings.data["researchers"]
+        with self.lock:
+            run.status = "researching"
+            run.research_holders = []
+            self._touch(run)
+        self.say("system", f"Исследование: {len(slots)} исследователя ищут реальные сценарии и проблемы"
+                 + (f"; материалов пользователя: {len(materials)}" if materials else "; материалов пользователя нет, ищем в сети")
+                 + ". Это может занять несколько минут.", run.package, "research")
+        ctx = PackageContext(self, run.package)
+        found = []
+        for target in targets:
+            reports, errors = self._research_target(run, spec, ctx, target, materials, slots)
+            if run.stop_flag:
+                with self.lock:
+                    run.status = "stopped"
+                    self._touch(run)
+                return None
+            for message in errors:
+                self.say("system", f"«{target['title']}»: {message}", run.package, "error")
+            if not reports:
+                self._fail(run, f"Исследователи не вернули результатов по «{target['title']}»: " + "; ".join(errors))
+                return None
+            found.append((target, reports))
+            ctx.state.setdefault("research", {})[target["id"]] = {"ts": time.time(), "reports": reports}
+            self.say("system", f"«{target['title']}»: отчёты получили {len(reports)} из {len(slots)} исследователей.",
+                     run.package, "research")
+        ctx.save_state()
+        with self.lock:
+            run.status = "running"
+            self._touch(run)
+        return spec["merge"](ctx, found)
+
+    def _research_target(self, run: Run, spec: dict, ctx: PackageContext, target: dict, materials: list[dict],
+                         slots: list[dict]) -> tuple[list[dict], list[str]]:
+        reports: list[dict | None] = [None] * len(slots)
+        errors: list[str] = []
+
+        def work(index: int) -> None:
+            slot = slots[index]
+            note = spec["note"](ctx, target, materials, index)
+            token = secrets.token_urlsafe(24)
+            holder = types.SimpleNamespace(proc=None)
+            box = {"kind": "researcher", "note": note, "report": None}
+            with self.lock:
+                self.tokens[token] = box
+                run.research_holders.append(holder)
+            try:
+                result = self._slot_request(
+                    slot, self.dir / "agent" / f"researcher-{index + 1}",
+                    spec["skill"].strip() + "\n\n" + RESEARCHER_RULES, note, token, "", True, holder,
+                )
+            finally:
+                with self.lock:
+                    self.tokens.pop(token, None)
+            with self.lock:
+                run.cost += result.cost
+            if run.stop_flag:
+                return
+            if result.error or box["report"] is None:
+                errors.append(f"исследователь {index + 1}: {result.error or 'не прислал отчёт'}")
+                return
+            box["report"]["who"] = (f"исследователь {index + 1} ({slot.get('agent')}/"
+                                    f"{slot.get('model') or 'модель по умолчанию'})")
+            reports[index] = box["report"]
+
+        threads = [threading.Thread(target=work, args=(i,), daemon=True, name=f"researcher-{i + 1}")
+                   for i in range(len(slots))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        return [r for r in reports if r], errors
+
+    @staticmethod
+    def _listarg(raw) -> list:
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except ValueError:
+                return []
+        return raw if isinstance(raw, list) else []
+
+    def _tool_report(self, ctx: dict, args: dict) -> str:
+        if ctx["report"] is not None:
+            raise ShellError("one_report", "Отчёт уже отправлен: заверши ход")
+
+        def text(value, limit):
+            return " ".join(str(value or "").split())[:limit]
+
+        def sources(raw):
+            return [text(s, 300) for s in self._listarg(raw) if text(s, 300)][:5]
+
+        scenarios, problems = [], []
+        for item in self._listarg(args.get("scenarios"))[:20]:
+            if isinstance(item, dict) and text(item.get("title"), 200):
+                scenarios.append({"title": text(item.get("title"), 200), "description": text(item.get("description"), 600),
+                                  "sources": sources(item.get("sources"))})
+        for item in self._listarg(args.get("problems"))[:40]:
+            if isinstance(item, dict) and text(item.get("title"), 200):
+                problems.append({"scenario": text(item.get("scenario"), 200), "title": text(item.get("title"), 200),
+                                 "description": text(item.get("description"), 600), "sources": sources(item.get("sources"))})
+        if not scenarios and not problems:
+            raise ShellError("empty_report", "В отчёте нет ни сценариев, ни проблем. Найди хотя бы что-то подтверждённое")
+        ctx["report"] = {"scenarios": scenarios, "problems": problems, "summary": text(args.get("summary"), 600)}
+        return "Принято. Заверши ход."
+
     def _slot_request(self, slot: dict, workdir: Path, system_text: str, note: str, token: str,
                       session: str, web: bool, run: Run | None) -> TurnResult:
         adapter = self.adapters.get(slot.get("agent") or "")
@@ -535,7 +670,8 @@ class Project:
         if run.autorun:
             spec = manifest["auto"]
             targets = [self.store.cards[i] for i in run.autorun["targets"] if i in self.store.cards]
-            parts.append(spec["note"](PackageContext(self, run.package), targets, self.settings.auto_limits(manifest)))
+            parts.append(spec["note"](PackageContext(self, run.package), targets, self.settings.auto_limits(manifest),
+                                      only_research=bool(run.autorun.get("only_research"))))
         if run.deferred:
             parts.append("Отложенные до человека вопросы (не задавай их снова): "
                          + "; ".join(q["question"] for q in run.deferred))
@@ -751,6 +887,8 @@ class Project:
             raise ShellError("bad_token", "Ход уже закончен: инструменты недоступны")
         if ctx["kind"] == "decider":
             return DECIDER_TOOLS
+        if ctx["kind"] == "researcher":
+            return RESEARCH_TOOLS
         if ctx["run"].autorun:                    # в автоматическом режиме вопросов нет
             return [t for t in PACKAGE_TOOLS if t["name"] != "ask"]
         return PACKAGE_TOOLS
@@ -760,6 +898,12 @@ class Project:
         if ctx is None:
             raise ShellError("bad_token", "Ход уже закончен: инструменты недоступны")
         args = args if isinstance(args, dict) else {}
+        if ctx["kind"] == "researcher":
+            if tool == "turn_info":
+                return ctx["note"]
+            if tool == "report":
+                return self._tool_report(ctx, args)
+            raise ShellError("unknown_tool", "У исследователя есть только turn_info и report")
         if tool == "graph_read":
             return self._tool_read(ctx, args)
         if ctx["kind"] == "decider":
