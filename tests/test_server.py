@@ -134,3 +134,16 @@ def test_mcp_bridge(served, tmp_path, monkeypatch):
     assert bad["isError"] is True
     monkeypatch.setenv("IDEA_GRAPH_TOKEN", "чужой")
     assert call("graph_read", mode="outline")["isError"] is True
+
+
+def test_auto_mode_public_manifest_and_limits(served):
+    served.registry.register({"id": "problem", "name": "Проблема", "kind": "agent", "skill": "Строй.",
+                              "card_fields": [{"kind": "проблема", "name": "Важность", "values": ["низкая"]}],
+                              "auto": {"targets": "домен", "limits": [{"key": "n", "name": "Сколько", "default": 3}],
+                                       "note": lambda ctx, targets, limits: ""}})
+    item = next(p for p in http(served, "/api/boot")[1]["packages"] if p["id"] == "problem")
+    assert item["auto"] == {"targets": "домен", "limits": [{"key": "n", "name": "Сколько", "default": 3}]}
+    assert item["card_fields"][0]["name"] == "Важность"
+    code, data = http(served, "/api/settings", {"auto_limits": {"problem": {"n": 99, "x": "zz"}}})
+    assert code == 200 and data["settings"]["auto_limits"] == {"problem": {"n": 20}}
+    assert served.settings.auto_limits(served.registry.get("problem")) == {"n": 20}

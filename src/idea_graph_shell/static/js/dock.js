@@ -3,7 +3,7 @@
 import {$, S, act, api, authorName, emit, esc, on, packageName, toast, when} from "./core.js";
 import {graphIndex, loadGraph} from "./graph.js";
 
-const D = {tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}, picked: {}};
+const D = {autoTarget: "", tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}, picked: {}};
 
 const STATUS_TEXT = {
   idle: "ждёт", running: "думает…", asking: "ждёт вашего ответа", deciding: "решатель думает…",
@@ -22,6 +22,39 @@ function runnable() {
 }
 function runOf(id) { return S.project?.runs?.[id]; }
 
+const DOCK_MIN = 320, DOCK_KEY = "ig-dock-width";
+const dockMax = () => Math.max(DOCK_MIN + 40, Math.min(900, Math.floor(window.innerWidth * 0.7)));
+
+function setDockWidth(width, save) {
+  const value = Math.round(Math.min(dockMax(), Math.max(DOCK_MIN, width)));
+  $("dock").style.width = value + "px";
+  if (save) { try { localStorage.setItem(DOCK_KEY, String(value)); } catch (error) { /* без запоминания */ } }
+  window.dispatchEvent(new Event("resize"));
+}
+
+function initDockResize() {
+  const handle = document.createElement("div");
+  handle.className = "dock-resize";
+  handle.title = "Потяните, чтобы изменить ширину панели";
+  $("dock").appendChild(handle);
+  try {
+    const saved = Number(localStorage.getItem(DOCK_KEY));
+    if (saved) setDockWidth(saved, false);
+  } catch (error) { /* без запоминания */ }
+  handle.onpointerdown = (e) => {
+    const startX = e.clientX, startWidth = $("dock").getBoundingClientRect().width;
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("drag");
+    handle.onpointermove = (ev) => setDockWidth(startWidth + (startX - ev.clientX), false);
+    handle.onpointerup = (ev) => {
+      handle.onpointermove = handle.onpointerup = null;
+      handle.classList.remove("drag");
+      handle.releasePointerCapture(ev.pointerId);
+      setDockWidth($("dock").getBoundingClientRect().width, true);
+    };
+  };
+}
+
 export function initDock() {
   $("dock").innerHTML = `
     <div class="pkg-bar" id="pkgBar"></div>
@@ -32,6 +65,7 @@ export function initDock() {
       <textarea id="chatInput" rows="2" placeholder="Сообщение пакету… (Enter — отправить, Shift+Enter — новая строка)"></textarea>
       <button class="primary" title="Отправить">➤</button>
     </form>`;
+  initDockResize();
   $("pkgBar").onclick = (e) => {
     const id = e.target.closest("[data-pkg]")?.dataset.pkg;
     if (id) { S.pkg = id; renderDock(); }
@@ -76,6 +110,17 @@ export function renderDock() {
   renderBody();
 }
 
+function autoRow(pkg, busy) {
+  const targets = [...graphIndex().cards.values()].filter((c) => c.kind === pkg.auto.targets);
+  if (D.autoTarget && !targets.some((c) => c.id === D.autoTarget)) D.autoTarget = "";
+  const options = [`<option value="">все (${targets.length})</option>`,
+    ...targets.map((c) => `<option value="${c.id}"${D.autoTarget === c.id ? " selected" : ""}>${esc(c.title.slice(0, 60))}</option>`)].join("");
+  return `<div class="ctl-row"><span class="hint" title="Агент без вопросов достроит ветку до результата в пределах лимитов из настроек. Карточки останутся предложенными: примите и поправьте их на графе">Автоматически:</span>
+      <select data-auto-target ${targets.length ? "" : "disabled"} title="Для какой карточки «${esc(pkg.auto.targets)}» запустить">${options}</select>
+      <button data-do="auto" ${targets.length && !busy ? "" : "disabled"}>⚡ Авто</button></div>
+    ${targets.length ? "" : `<div class="hint">Автоматический режим требует хотя бы одну карточку «${esc(pkg.auto.targets)}»: нажмите «+ Домен» вверху.</div>`}`;
+}
+
 function renderControls() {
   const box = $("pkgCtl"), pkg = S.boot.packages.find((p) => p.id === S.pkg);
   if (!pkg) { setHtml(box, ""); return; }
@@ -86,20 +131,24 @@ function renderControls() {
   setHtml(box, `
     <div class="ctl-row">
       <span class="status s-${status}">${STATUS_TEXT[status] || status}</span>
+      ${run?.auto ? '<span class="chip" title="Работает автоматический режим: вопросов не будет">авто</span>' : ""}
       ${run?.turn ? `<span class="hint">ходов: ${run.turn}${run.cost ? ` · $${run.cost.toFixed(3)}` : ""}</span>` : ""}
       <span class="spacer"></span>
       ${busy ? '<button data-do="stop">■ Стоп</button>'
         : `<button class="primary" data-do="${status === "paused" ? "resume" : "start"}">${status === "paused" ? "Продолжить" : started && pkg.kind === "agent" && status !== "finished" ? "▶ Продолжить" : "▶ Запустить"}</button>`}
       ${started && !busy && pkg.kind === "agent" ? '<button data-do="fresh" title="Начать с новой сессией агента: он получит весь граф заново">Заново</button>' : ""}
     </div>
+    ${pkg.auto ? autoRow(pkg, busy) : ""}
     ${pkg.asks && S.boot.packages.some((p) => p.kind === "decider") ? `<div class="ctl-row"><span class="hint">На вопросы отвечает:</span>
       <div class="seg"><button data-who="human" class="${answerer === "human" ? "on" : ""}">Я</button><button data-who="decider" class="${answerer === "decider" ? "on" : ""}" title="Пакет-решатель: его решения помечаются и их можно переопределить">Решатель</button></div></div>` : ""}
     ${run?.error ? `<div class="err">${esc(run.error)}</div>` : ""}
     ${status === "paused" && run.pause_reason ? `<div class="warn-box">${esc(run.pause_reason)}</div>` : ""}
     ${status === "finished" && run.outcome ? `<div class="hint">Итог: <b>${esc(run.outcome)}</b></div>` : ""}`);
+  box.onchange = (e) => { if (e.target.dataset.autoTarget !== undefined) D.autoTarget = e.target.value; };
   box.onclick = (e) => {
     const todo = e.target.dataset.do, who = e.target.dataset.who;
     if (todo === "start") act(async () => { await api("/api/run/start", {package: pkg.id}); emit("poll"); });
+    if (todo === "auto") act(async () => { await api("/api/run/start", {package: pkg.id, auto: {targets: D.autoTarget ? [D.autoTarget] : []}}); emit("poll"); });
     if (todo === "fresh") act(async () => { await api("/api/run/start", {package: pkg.id, fresh: true}); emit("poll"); });
     if (todo === "stop") act(async () => { await api("/api/run/stop", {package: pkg.id}); emit("poll"); });
     if (todo === "resume") act(async () => { await api("/api/run/resume", {package: pkg.id}); emit("poll"); });

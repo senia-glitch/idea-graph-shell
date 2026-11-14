@@ -42,6 +42,9 @@ class ShellError(Exception):
         return {"error": self.code, "message": self.message}
 
 
+AUTO_MAX_TURNS = 4        # сколько раз автоматический режим продолжит работу, если агент не вызвал finish
+
+
 class PackageContext:
     """То, что получает код пакета (``prepare``, ``conclude``, ``run``)."""
 
@@ -67,7 +70,7 @@ class Run:
 
     SAVED = ("package", "status", "session_id", "turn", "last_read", "question", "deferred", "inbox",
              "outcome", "summary", "error", "cost", "auto_streak", "auto_cost", "last_answer",
-             "answerer", "pause_reason", "finished")
+             "answerer", "pause_reason", "finished", "autorun", "autorun_turns")
 
     def __init__(self, package: str):
         self.package = package
@@ -88,6 +91,8 @@ class Run:
         self.answerer = ""             # "human" | "decider" | "" (взять из настроек идеи)
         self.pause_reason = ""
         self.finished = False
+        self.autorun: dict | None = None   # автоматический режим: {"targets": [id карточек]}; вопросов нет
+        self.autorun_turns = 0
         # не сохраняется:
         self.thread: threading.Thread | None = None
         self.proc = None
@@ -113,7 +118,7 @@ class Run:
             "package": self.package, "status": self.status, "turn": self.turn,
             "cost": round(self.cost, 4), "question": self.question, "deferred": self.deferred,
             "outcome": self.outcome, "summary": self.summary, "error": self.error,
-            "answerer": self.answerer, "pause_reason": self.pause_reason,
+            "answerer": self.answerer, "pause_reason": self.pause_reason, "auto": self.autorun,
             "has_session": bool(self.session_id),
         }
 
@@ -235,11 +240,31 @@ class Project:
             raise ShellError("unknown_package", f"Пакет «{package_id}» не установлен")
         return manifest
 
-    def start(self, package_id: str, fresh: bool = False, answerer: str = "") -> dict:
-        """Запустить пакет или продолжить его работу. ``fresh`` — начать с новой сессией агента."""
+    def start(self, package_id: str, fresh: bool = False, answerer: str = "", auto: dict | None = None) -> dict:
+        """Запустить пакет или продолжить его работу. ``fresh`` — начать с новой сессией агента.
+
+        ``auto`` — автоматический режим: ``{"targets": [id, …]}`` (пусто — все карточки нужного вида).
+        Агент не задаёт вопросов и сам строит ветку; нужна хотя бы одна карточка-цель.
+        """
         manifest = self._manifest(package_id)
         if manifest["kind"] not in ("agent", "code"):
             raise ShellError("not_runnable", f"Пакет «{manifest['name']}» не запускается как шаг")
+        auto_info = None
+        if auto is not None:
+            spec = manifest.get("auto")
+            if manifest["kind"] != "agent" or not isinstance(spec, dict):
+                raise ShellError("no_auto", f"У пакета «{manifest['name']}» нет автоматического режима")
+            wanted = [str(x) for x in (auto.get("targets") or [])]
+            pool = sorted((c for c in self.store.cards.values() if c["kind"] == spec["targets"]),
+                          key=lambda c: int(c["id"][1:]))
+            targets = [c for c in pool if not wanted or c["id"] in wanted]
+            if wanted and len(targets) != len(set(wanted)):
+                raise ShellError("unknown_target", f"Выбрана карточка, которой нет среди «{spec['targets']}»")
+            if not targets:
+                raise ShellError("no_target", f"Автоматический режим требует хотя бы одну карточку «{spec['targets']}»: "
+                                              "напишите её вручную")
+            auto_info = {"targets": [c["id"] for c in targets]}
+            fresh = True
         with self.lock:
             run = self.runs.get(package_id)
             if run is not None and run.status in BUSY:
@@ -252,13 +277,17 @@ class Project:
                     run.deferred = old.deferred
                 self.runs[package_id] = run
             run.answerer = answerer
+            run.autorun = auto_info
+            run.autorun_turns = 0
             run.stop_flag = False
             run.finished = False
             run.error = run.outcome = run.summary = run.pause_reason = ""
             run.auto_streak = 0
             run.auto_cost = 0.0
             if manifest["kind"] == "agent" and run.question is None and not run.inbox:
-                run.inbox.append("Начало работы пакета." if run.turn == 0 else "Человек попросил продолжить работу.")
+                run.inbox.append("Начало работы пакета в автоматическом режиме." if auto_info
+                                 else "Начало работы пакета." if run.turn == 0
+                                 else "Человек попросил продолжить работу.")
             run.status = "running"
             self._touch(run)
         self.say("system", f"Запущен пакет «{manifest['name']}»", package_id, "start")
@@ -443,6 +472,16 @@ class Project:
                 self._touch(run)
             if silent and result.text.strip():
                 self.say("agent", result.text.strip(), run.package)
+            if run.autorun and not run.finished and run.question is None and not run.stop_flag:
+                # автоматический режим: вопросов нет, поэтому ход без finish — не конец, а повод продолжить
+                with self.lock:
+                    more = run.autorun_turns < AUTO_MAX_TURNS
+                    if more:
+                        run.autorun_turns += 1
+                        run.inbox.append("Автоматический режим: работа ещё не закончена. Продолжай и заверши её через finish.")
+                if not more:
+                    self.say("system", "Автоматический режим остановлен: агент не завершил работу за "
+                             f"{AUTO_MAX_TURNS + 1} хода. Запустите ещё раз, чтобы продолжить.", run.package, "pause")
 
     def _slot_request(self, slot: dict, workdir: Path, system_text: str, note: str, token: str,
                       session: str, web: bool, run: Run | None) -> TurnResult:
@@ -493,6 +532,10 @@ class Project:
             changes = views.changes_text(self.store, run.last_read, exclude_author=f"package:{run.package}")
             parts.append("Изменения графа с твоего прошлого хода, сделанные не тобой:\n" + changes
                          if changes else "Чужих изменений графа с твоего прошлого хода нет.")
+        if run.autorun:
+            spec = manifest["auto"]
+            targets = [self.store.cards[i] for i in run.autorun["targets"] if i in self.store.cards]
+            parts.append(spec["note"](PackageContext(self, run.package), targets, self.settings.auto_limits(manifest)))
         if run.deferred:
             parts.append("Отложенные до человека вопросы (не задавай их снова): "
                          + "; ".join(q["question"] for q in run.deferred))
@@ -706,7 +749,11 @@ class Project:
         ctx = self.tokens.get(token)
         if ctx is None:
             raise ShellError("bad_token", "Ход уже закончен: инструменты недоступны")
-        return DECIDER_TOOLS if ctx["kind"] == "decider" else PACKAGE_TOOLS
+        if ctx["kind"] == "decider":
+            return DECIDER_TOOLS
+        if ctx["run"].autorun:                    # в автоматическом режиме вопросов нет
+            return [t for t in PACKAGE_TOOLS if t["name"] != "ask"]
+        return PACKAGE_TOOLS
 
     def tool_call(self, token: str, tool: str, args: dict) -> str:
         ctx = self.tokens.get(token)
@@ -775,6 +822,8 @@ class Project:
 
     def _tool_ask(self, ctx: dict, args: dict) -> str:
         run: Run = ctx["run"]
+        if run.autorun:
+            raise ShellError("auto_mode", "Автоматический режим: вопросов нет. Реши сам и продолжай работу")
         if run.asked_this_turn or run.question is not None:
             raise ShellError("one_question", "За ход — один вопрос. Вопрос уже задан: заканчивай ход.")
         text = str(args.get("question") or "").strip()

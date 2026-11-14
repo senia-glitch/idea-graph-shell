@@ -179,7 +179,9 @@ class App:
         if path == "/api/undo":
             return project.undo(data.get("rev"))
         if path == "/api/run/start":
-            return project.start(str(data.get("package") or ""), bool(data.get("fresh")))
+            auto = data.get("auto")
+            return project.start(str(data.get("package") or ""), bool(data.get("fresh")),
+                                 auto=auto if isinstance(auto, dict) else None)
         if path == "/api/run/stop":
             return project.stop(str(data.get("package") or ""))
         if path == "/api/run/resume":

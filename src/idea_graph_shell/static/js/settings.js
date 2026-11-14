@@ -37,6 +37,10 @@ export async function renderSettings() {
     <h2>Корневая папка проектов</h2>
     <div class="form-grid one"><label>Здесь создаются новые проекты и ищутся существующие (пусто — «Документы\\Граф идеи»)
       <input id="projectsRoot" value="${esc(st.projects_root || "")}" placeholder="${esc(S.boot.projects_root || "")}"></label></div>
+    ${S.boot.packages.some((p) => p.auto) ? `<h2>Автоматический режим</h2>
+    <p class="hint">В автоматическом режиме агент без вопросов достраивает ветку и не выходит за эти лимиты.</p>
+    <div class="form-grid">${S.boot.packages.filter((p) => p.auto).map((p) => p.auto.limits.map((l) =>
+      `<label>${esc(l.name)}<input type="number" min="1" max="20" data-auto="${p.id}.${l.key}" value="${(st.auto_limits?.[p.id]?.[l.key]) ?? l.default}"></label>`).join("")).join("")}</div>` : ""}
     <h2>Агенты</h2>
     <p class="hint">Оболочка сама запускает выбранного агента и даёт ему только свои инструменты: читать граф, менять граф, задать вопрос, завершить работу. Файлы и терминал агенту закрыты.</p>
     <div class="agents">${agents.map((a) => `<div class="agent-card ${a.found ? "ok" : "bad"}"><b>${esc(a.name)}</b>
@@ -81,9 +85,19 @@ export async function renderSettings() {
   });
 }
 
+function autoLimits() {
+  const out = {};
+  document.querySelectorAll("[data-auto]").forEach((input) => {
+    const [pkg, key] = input.dataset.auto.split(".");
+    (out[pkg] = out[pkg] || {})[key] = Math.max(1, Math.min(20, Number(input.value) || 1));
+  });
+  return out;
+}
+
 function collect() {
   const st = S.boot.settings;
   const patch = {
+    auto_limits: autoLimits(),
     projects_root: $("projectsRoot") ? $("projectsRoot").value.trim() : (st.projects_root || ""),
     slots: {}, deciders: [{...st.deciders[0]}, {...st.deciders[1]}], default_slot: {...st.default_slot},
     automation: $("aRounds") ? {rounds: +$("aRounds").value, fuse_decisions: +$("aFuse").value, fuse_cost: +$("aCost").value, important_dependents: +$("aImportant").value} : {...st.automation},
@@ -101,5 +115,6 @@ function collect() {
   st.deciders = patch.deciders;
   st.default_slot = patch.default_slot;
   st.automation = patch.automation;
+  st.auto_limits = patch.auto_limits;
   return patch;
 }

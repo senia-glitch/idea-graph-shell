@@ -45,6 +45,29 @@ function decisionBadges(card) {
   return bits.length ? `<div class="badges">${bits.join("")}</div>` : "";
 }
 
+function cardFields(card) {
+  return S.boot.packages.flatMap((p) => p.card_fields || []).filter((f) => f.kind === card.kind);
+}
+
+function fieldRegex(name) {
+  return new RegExp("^\\s*" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*:\\s*(.+?)\\s*$", "i");
+}
+
+function fieldValue(card, field) {
+  const re = fieldRegex(field.name);
+  const found = (card.body || "").split("\n").map((l) => l.match(re)).filter(Boolean).pop();
+  const value = found ? found[1].trim().replace(/\.$/, "").toLowerCase() : "";
+  return field.values.includes(value) ? value : "";
+}
+
+function setFieldValue(card, field, value) {
+  const re = fieldRegex(field.name);
+  const lines = (card.body || "").split("\n").filter((l) => !re.test(l));
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (value) lines.push(`${field.name}: ${value}`);
+  return lines.join("\n");
+}
+
 function renderNode(card) {
   const agent = card.author !== "human";
   return `<div class="hd" style="--c:${kindColor(card.kind)}"><span class="grip" title="Перетащить карточку вместе с её веткой">⠿</span>` +
@@ -224,6 +247,8 @@ function renderInspector() {
     <datalist id="kindList2">${kinds().map((k) => `<option value="${esc(k)}">`).join("")}</datalist>
     <label>Заголовок<input id="fTitle" value="${esc(card.title)}" maxlength="200"></label>
     <label>Текст<textarea id="fBody" rows="7">${esc(card.body || "")}</textarea></label>
+    ${cardFields(card).map((f, i) => `<label>${esc(f.name)}<select data-field="${i}"><option value="">не выбрана</option>${f.values.map((v) =>
+      `<option value="${esc(v)}"${fieldValue(card, f) === v ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("")}
     <div class="seg" id="fStatus">${Object.entries(STATUS).map(([key, name]) =>
       `<button class="${card.status === key ? "on" : ""}" data-status="${key}">${name}</button>`).join("")}</div>
     <div class="hint">Автор: ${esc(authorName(card.author))} · зависит карточек: ${dependents(card.id).size}</div>
@@ -238,6 +263,12 @@ function renderInspector() {
     if (value !== (card[field] || "")) act(() => ops([{op: "update_card", id: card.id, [field]: value}]));
   });
   save("kind", "fKind"); save("title", "fTitle"); save("body", "fBody");
+  box.querySelectorAll("select[data-field]").forEach((select) => {
+    select.onchange = () => {
+      const field = cardFields(card)[Number(select.dataset.field)];
+      act(() => ops([{op: "update_card", id: card.id, body: setFieldValue(card, field, select.value)}]));
+    };
+  });
   $("inspClose").onclick = () => { canvas.select(null); renderInspector(); };
   $("fStatus").onclick = (e) => {
     const status = e.target.dataset.status;

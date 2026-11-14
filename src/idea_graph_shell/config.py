@@ -26,6 +26,7 @@ DEFAULTS = {
         "important_dependents": 3,     # вопрос важный, если от его карточки зависит столько карточек
     },
     "recent": [],
+    "auto_limits": {},                 # id пакета -> {ключ лимита: число} для автоматического режима
     "projects_root": "",               # корневая папка проектов; пусто — «Документы\\Граф идеи»
 }
 
@@ -68,8 +69,15 @@ class Settings:
 
     def update(self, patch: dict) -> dict:
         allowed = {k: v for k, v in (patch or {}).items()
-                   if k in ("slots", "default_slot", "deciders", "automation", "projects_root")}
+                   if k in ("slots", "default_slot", "deciders", "automation", "projects_root", "auto_limits")}
         deciders = allowed.get("deciders")
+        if "auto_limits" in allowed:
+            clean: dict = {}
+            for package, limits in (allowed["auto_limits"] or {}).items() if isinstance(allowed["auto_limits"], dict) else []:
+                if isinstance(limits, dict):
+                    clean[str(package)] = {str(k): max(1, min(20, int(v))) for k, v in limits.items()
+                                           if str(v).lstrip("-").isdigit()}
+            allowed["auto_limits"] = clean
         if "projects_root" in allowed:
             allowed["projects_root"] = str(allowed["projects_root"] or "").strip()
         self.data = _merge(self.data, {k: v for k, v in allowed.items() if k != "deciders"})
@@ -87,6 +95,12 @@ class Settings:
         return {"agent": slot.get("agent") or base.get("agent") or "claude",
                 "model": slot.get("model", base.get("model", "")) or "",
                 "effort": slot.get("effort", base.get("effort", "")) or ""}
+
+    def auto_limits(self, manifest: dict) -> dict:
+        """Лимиты автоматического режима пакета: значения из настроек поверх умолчаний пакета."""
+        saved = (self.data.get("auto_limits") or {}).get(manifest["id"]) or {}
+        spec = (manifest.get("auto") or {}).get("limits") or []
+        return {item["key"]: int(saved.get(item["key"], item.get("default", 3))) for item in spec}
 
     def remember(self, folder: str) -> None:
         recent = [f for f in self.data.get("recent", []) if f != folder]

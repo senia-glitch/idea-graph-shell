@@ -280,3 +280,64 @@ def test_decider_gets_question_through_turn_info(make):
     assert "Реши вопрос: Что учесть?" in seen["info"]                       # вопрос пришёл через turn_info
     chosen = project.store.cards["c1"]  # граф не тронут решателем
     assert chosen["kind"] == "ветка"
+
+
+def auto_manifest():
+    return {"id": "problem", "name": "Проблема", "kind": "agent", "skill": "Строй ветку.", "asks": True,
+            "outcomes": ["готово"],
+            "auto": {"targets": "домен", "limits": [{"key": "n", "name": "Сколько", "default": 3}],
+                     "note": lambda ctx, targets, limits: "АВТО: " + ",".join(c["id"] for c in targets) + f" n={limits['n']}"}}
+
+
+def test_auto_mode_needs_a_target_card(make):
+    project = make(lambda note, call, request: "", [auto_manifest()])
+    with pytest.raises(ShellError) as info:
+        project.start("problem", auto={"targets": []})
+    assert info.value.code == "no_target"
+    with pytest.raises(ShellError) as info:
+        project.start("clarify", auto={"targets": []})
+    assert info.value.code == "no_auto"
+    project.store.apply([{"op": "add_card", "kind": "домен", "title": "Пациенты"}], HUMAN)
+    with pytest.raises(ShellError) as info:
+        project.start("problem", auto={"targets": ["c1"]})            # c1 — не домен
+    assert info.value.code == "unknown_target"
+
+
+def test_auto_mode_has_no_questions_and_runs_until_finish(make):
+    seen = {"tools": [], "turns": []}
+
+    def script(note, call, request):
+        seen["turns"].append(note)
+        seen["tools"].append([t["name"] for t in project.tools_for(next(iter(project.tokens)))])
+        assert call("ask", question="Кто?", options=["а", "б"]).startswith("ОТКАЗ auto_mode")
+        if len(seen["turns"]) == 1:      # первый ход заканчивается без finish: режим продолжит сам
+            call("graph_apply", ops=[{"op": "add_card", "kind": "сценарий", "title": "Утром", "parent": "c2"}])
+            return ""
+        call("finish", outcome="готово", summary="достроено")
+        return ""
+
+    project = make(script, [auto_manifest()])
+    project.store.apply([{"op": "add_card", "kind": "домен", "title": "Пациенты"}], HUMAN)
+    project.settings.data["auto_limits"] = {"problem": {"n": 5}}
+    project.start("problem", auto={"targets": []})
+    run = wait_for(lambda: project.runs.get("problem"), ("finished",))
+    assert run.outcome == "готово" and len(seen["turns"]) == 2 and run.question is None
+    assert "ask" not in seen["tools"][0] and "finish" in seen["tools"][0]
+    assert "АВТО: c2 n=5" in seen["turns"][0] and "Продолжай и заверши" in seen["turns"][1]
+    card = project.store.cards["c3"]
+    assert card["status"] == "proposed" and card["author"] == "package:problem"
+    assert project.runs["problem"].public()["auto"] == {"targets": ["c2"]}
+
+
+def test_normal_start_after_auto_has_questions_again(make):
+    def script(note, call, request):
+        call("finish", outcome="готово", summary="ок")
+        return ""
+
+    project = make(script, [auto_manifest()])
+    project.store.apply([{"op": "add_card", "kind": "домен", "title": "Пациенты"}], HUMAN)
+    project.start("problem", auto={"targets": ["c2"]})
+    wait_for(lambda: project.runs.get("problem"), ("finished",))
+    project.start("problem")
+    run = wait_for(lambda: project.runs.get("problem"), ("finished",))
+    assert run.autorun is None

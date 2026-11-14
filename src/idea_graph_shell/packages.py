@@ -32,7 +32,7 @@ from importlib import metadata
 GROUP = "idea_graph.packages"
 KINDS = ("agent", "code", "decider", "view")
 PUBLIC = ("id", "name", "description", "kind", "reads", "writes", "asks", "web_search",
-          "model_level", "outcomes", "tab", "version", "order")
+          "model_level", "outcomes", "tab", "version", "order", "card_fields")
 
 
 def normalize(raw: dict) -> dict:
@@ -86,4 +86,11 @@ class Registry:
 
     def public(self) -> list[dict]:
         ordered = sorted(self.items.values(), key=lambda m: (m.get("order") or 100, m["name"]))
-        return [{key: m.get(key) for key in PUBLIC} for m in ordered]
+        out = []
+        for m in ordered:
+            item = {key: m.get(key) for key in PUBLIC}
+            auto = m.get("auto")
+            if isinstance(auto, dict):          # функцию-«вводные» наружу не отдаём
+                item["auto"] = {"targets": auto.get("targets"), "limits": list(auto.get("limits") or [])}
+            out.append(item)
+        return out
