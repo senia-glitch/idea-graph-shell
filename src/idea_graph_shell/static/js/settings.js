@@ -48,6 +48,10 @@ export async function renderSettings() {
     <p class="hint">Предлагает роли, сценарии, проблемы и варианты автоматизации, строит диаграммы.</p>
     ${table(slotRow("helper", "Помощник", "предлагает и строит диаграммы", st.helper), "Роль")}
 
+    <h2>Автопилот</h2>
+    <p class="hint">Сильная модель: сначала задаёт вопросы о границах системы (до 15), затем сама проходит всю цепочку — принимает и отклоняет предложения. Выберите самую сильную модель.</p>
+    ${table(slotRow("autopilot", "Автопилот", "вопросы о границах и решения", st.autopilot), "Роль")}
+
     <h2>Исследователи</h2>
     <p class="hint">Три агента независимо ищут конкурентов и анализируют их сайты. Нужен веб-поиск; дайте им разные модели.</p>
     ${table([0, 1, 2].map((i) => slotRow("researcher:" + i, "Исследователь " + (i + 1), "поиск и анализ в сети", st.researchers[i])).join(""), "Роль")}
@@ -73,15 +77,16 @@ export async function renderSettings() {
 
 function collect() {
   const st = S.boot.settings;
-  const patch = {projects_root: $("projectsRoot") ? $("projectsRoot").value.trim() : (st.projects_root || ""), helper: {...st.helper},
+  const patch = {projects_root: $("projectsRoot") ? $("projectsRoot").value.trim() : (st.projects_root || ""), helper: {...st.helper}, autopilot: {...st.autopilot},
     researchers: st.researchers.map((r) => ({...r}))};
   document.querySelectorAll("tr[data-slot]").forEach((row) => {
     const slot = {};
     row.querySelectorAll("[data-f]").forEach((el) => { slot[el.dataset.f] = el.value; });
     const key = row.dataset.slot;
     if (key === "helper") patch.helper = slot;
+    else if (key === "autopilot") patch.autopilot = slot;
     else patch.researchers[Number(key.slice(11))] = slot;
   });
-  Object.assign(st, {helper: patch.helper, researchers: patch.researchers});     // чтобы перерисовка показала новый выбор
+  Object.assign(st, {helper: patch.helper, autopilot: patch.autopilot, researchers: patch.researchers});     // чтобы перерисовка показала новый выбор
   return patch;
 }

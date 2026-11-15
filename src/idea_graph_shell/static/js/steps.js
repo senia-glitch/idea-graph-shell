@@ -48,7 +48,7 @@ function addForm(action, placeholder, extra = "", hidden = "") {
   return `<form class="add" data-form="${action}" ${hidden}><input name="title" placeholder="${esc(placeholder)}" autocomplete="off"${dis()}>${extra}<button${dis()}>Добавить</button></form>`;
 }
 
-const RUN_STEP = {competitors: 1, analysis: 2, roles: 3, scenarios: 4, problems: 5, asis: 5, variants: 6, solution: 6};
+const RUN_STEP = {autopilot: 0, competitors: 1, analysis: 2, roles: 3, scenarios: 4, problems: 5, asis: 5, variants: 6, solution: 6};
 
 function runBlock() {
   const r = run();
@@ -89,7 +89,19 @@ function nav(i) {
 function stepSphere() {
   const sphere = cards("сфера")[0];
   return `<p class="sub">Какой бизнес вы хотите автоматизировать? Одна короткая фраза, например «парикмахерская».</p>
-    <form class="add" data-form="set_sphere"><input name="title" value="${esc(U.text.sphere ?? sphere?.title ?? "")}" data-text="sphere" placeholder="Сфера бизнеса" autocomplete="off"${dis()}><button class="primary"${dis()}>Сохранить</button></form>`;
+    <form class="add" data-form="set_sphere"><input name="title" value="${esc(U.text.sphere ?? sphere?.title ?? "")}" data-text="sphere" placeholder="Сфера бизнеса" autocomplete="off"${dis()}><button class="primary"${dis()}>Сохранить</button></form>
+    ${sphere ? pilotBlock() : ""}`;
+}
+
+function pilotBlock() {
+  const has = cards("роль").length || cards("сценарий").length || records("competitor").length;
+  const how = has
+    ? `<div class="hint">В проекте уже что-то есть. «Довести до согласования»: автопилот принимает и отклоняет то, что ждёт решения, и достраивает недостающее, готовое не трогает.
+        «Улучшить уже есть»: сверх этого оценивает сделанное, убирает слабое (в том числе принятое вами), дополняет недостающим и перестраивает диаграммы.</div>
+      <div class="top">${start("autopilot", "Довести до согласования", "", "primary")}${start("autopilot", "Улучшить уже есть", 'data-redo="1"')}</div>`
+    : `<div class="hint">Проект пуст: автопилот построит всё с нуля.</div><div class="top">${start("autopilot", "Построить автоматически", "", "primary")}</div>`;
+  return `<div class="block"><div class="lbl">Автопилот</div>
+    <div class="hint">Сначала сильная модель анализирует, что уже есть, и (если границ ещё нет) задаёт до 15 вопросов о границах системы. Затем сама проходит цепочку. Всё можно поправить вручную, «Стоп» останавливает.</div>${how}</div>`;
 }
 
 function stepCompetitors() {
