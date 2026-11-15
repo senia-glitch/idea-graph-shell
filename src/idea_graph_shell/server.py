@@ -155,6 +155,8 @@ class App:
             return {"items": resources.load(self.need().dir)["items"]}
         if path == "/api/stage":
             return self.need().stage_status(query.get("package", [""])[0])
+        if path == "/api/document":
+            return {"markdown": self.need().document()}
         if path == "/api/bank":
             bank = self.need().store.bank(query.get("name", [""])[0])
             kind = query.get("type", [""])[0] or None
@@ -189,13 +191,12 @@ class App:
             except resources.ResourceError as error:
                 raise EngineError("bad_resource", str(error)) from None
             return {"ok": True}
-        if path in ("/api/stage/approve", "/api/stage/reopen", "/api/stage/clear-stale"):
-            package, step = str(data.get("package") or ""), str(data.get("step") or "")
-            if path.endswith("approve"):
-                return project.approve_step(package, step, bool(data.get("accept_all")))
-            return project.reopen_step(package, step) if path.endswith("reopen") else project.clear_stale(package, step)
-        if path == "/api/stage/skip":
-            return project.skip_stage(str(data.get("package") or ""), bool(data.get("skipped")))
+        if path == "/api/stage/clear-stale":
+            return project.clear_stale(str(data.get("package") or ""), str(data.get("step") or ""))
+        if path == "/api/document/save":                  # сохранить документ файлом в папку проекта
+            target = project.folder / "Документ.md"
+            target.write_text(project.document(), encoding="utf-8")
+            return {"path": str(target)}
         if path == "/api/proposals/apply":
             return project.apply_proposal(str(data.get("id") or ""))
         if path == "/api/bank/save":                      # правка банка человеком (например, списка конкурентов)
@@ -225,7 +226,8 @@ class App:
             return project.start(str(data.get("package") or ""), bool(data.get("fresh")),
                                  auto=auto if isinstance(auto, dict) else None,
                                  step=str(data.get("step") or "") or None, action=str(data.get("action") or "") or None,
-                                 target=str(data.get("target") or "") or None, goal=str(data.get("goal") or ""))
+                                 target=str(data.get("target") or "") or None, goal=str(data.get("goal") or ""),
+                                 phase=str(data.get("phase") or "") or None)
         if path == "/api/run/stop":
             return project.stop(str(data.get("package") or ""))
         if path == "/api/run/propose":

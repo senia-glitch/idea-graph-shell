@@ -25,6 +25,13 @@ const SERVICE_KINDS = ["открытый вопрос", "замечание", "�
 const EDGE_COLORS = {"противоречит": "#ff5d5d", "о карточке": "#ff8fa3", "подтверждает": "#7fc97f", "опровергает": "#ff5d5d"};
 
 export function graphIndex() { return G; }
+export const selectedCardId = () => canvas?.state.selected || "";
+let focusKinds = null;      // виды карточек крупного этапа в фокусе; остальные затемняются
+const NEVER_DIM = new Set(["замечание", "правка"]);
+export function setFocus(kinds) {
+  focusKinds = kinds && kinds.size ? kinds : null;
+  canvas?.draw();
+}
 export function kinds() { return [...new Set([...G.cards.values()].map((c) => c.kind))]; }
 export function dependents(id) {
   const incoming = new Map();
@@ -149,7 +156,7 @@ export function initGraph() {
   canvas = createCanvas($("canvas"), {
     renderNode,
     renderPending,
-    nodeClass: (card) => (card.status === "proposed" ? "planned " : ""),
+    nodeClass: (card) => (card.status === "proposed" ? "planned " : "") + (focusKinds && !focusKinds.has(card.kind) && !NEVER_DIM.has(card.kind) ? "dim " : ""),
     // новая карточка встаёт рядом с родителем, а если родителя нет — рядом с тем, на что она ссылается
     parentsOf: (id) => G.parents.get(id) || G.edges.filter((e) => e.from === id).map((e) => e.to),
     childrenOf: (id) => G.children.get(id) || [],
@@ -159,7 +166,7 @@ export function initGraph() {
     onZoom: (percent) => { $("zoomLabel").textContent = percent + "%"; },
     onView: scheduleLayoutSave,
     onMoved: scheduleLayoutSave,
-    onSelect: () => renderInspector(),
+    onSelect: () => { renderInspector(); emit("select"); },
     onEdgeSelect: () => renderInspector(),
     onAction,
     onCreate: (parentId, data, point) => act(async () => {

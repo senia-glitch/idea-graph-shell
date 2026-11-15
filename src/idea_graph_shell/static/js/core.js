@@ -9,7 +9,7 @@ export const S = {
   graph: null,         // карточки и связи
   chat: [],
   chatSeq: 0,
-  pkg: "",             // пакет, выбранный в панели справа
+  phase: "",           // крупный этап в фокусе
 };
 
 export const $ = (id) => document.getElementById(id);
@@ -125,4 +125,15 @@ export function authorName(author) {
 
 export function packageName(id) {
   return S.boot?.packages.find((p) => p.id === id)?.name || id;
+}
+
+/* Крупные этапы: порядок берётся из шагов пакетов (поле phase), без жёстко заданных названий. */
+export function allSteps() {
+  return [...stagePackages()].sort((a, b) => (a.order || 100) - (b.order || 100)).flatMap((pkg) =>
+    pkg.stage.steps.map((step) => ({pkg, step, st: (S.project?.stages?.[pkg.id]?.steps || []).find((s) => s.id === step.id) || {}})));
+}
+export function phases() {
+  const names = [];
+  for (const {step} of allSteps()) if (!names.includes(step.phase || "Этап")) names.push(step.phase || "Этап");
+  return names.map((name) => ({name, steps: allSteps().filter(({step}) => (step.phase || "Этап") === name)}));
 }

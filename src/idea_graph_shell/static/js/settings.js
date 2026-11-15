@@ -2,7 +2,7 @@
 
 import {$, S, act, api, esc, toast} from "./core.js";
 
-let agents = null;
+let agents = null, advancedOpen = false;
 
 function slotRow(key, label, hint, slot) {
   const agent = agents.find((a) => a.id === slot.agent) || agents[0];
@@ -48,10 +48,14 @@ export async function renderSettings() {
       <div class="hint">${a.found ? esc(a.path) : "команда не найдена — установите агента и войдите в него"}</div>
       <button data-check="${a.id}">Подключить</button> <span class="hint" id="check-${a.id}"></span></div>`).join("")}</div>
 
-    <h2>Помощник этапа</h2>
-    <p class="hint">Основной агент каждого этапа: ведёт диалог, предлагает, проверяет, строит диаграммы.</p>
-    ${slotTable(slotRow("default", "По умолчанию", "для этапов без своей настройки", st.default_slot)
-      + packages.map((p) => slotRow("pkg:" + p.id, p.name, `рекомендуемая модель: ${p.model_level}`, slot(p.id))).join(""), "Этап")}
+    <h2>Помощник</h2>
+    <p class="hint">Основной агент: ведёт диалог, предлагает, проверяет, строит диаграммы. Остальное (исследователи, совет, ревью) нужно только для продвинутых функций и настроено разумно по умолчанию.</p>
+    ${slotTable(slotRow("default", "Помощник", "ведёт диалог, предлагает, проверяет, строит диаграммы", st.default_slot), "Роль")}
+
+    <details class="advanced"${advancedOpen ? " open" : ""}><summary>Дополнительно: свои модели для этапов, исследователи, совет, ревью, автоматический режим</summary>
+    <h2>Свои модели для этапов</h2>
+    <p class="hint">Если этапу нужна другая модель, чем основному помощнику.</p>
+    ${slotTable(packages.map((p) => slotRow("pkg:" + p.id, p.name, `рекомендуемая модель: ${p.model_level}`, slot(p.id))).join(""), "Этап")}
 
     <h2>Исследователи</h2>
     <p class="hint">Три агента независимо ищут в сети и в ваших ресурсах (вкладка «Ресурсы»). Им нужен агент с веб-поиском (например, Claude Code); дайте им разные модели.</p>
@@ -70,12 +74,15 @@ export async function renderSettings() {
     <div class="form-grid">${withAuto.map((p) => p.auto.limits.map((l) =>
       `<label>${esc(p.name)}: ${esc(l.name)}<input type="number" min="1" max="20" data-auto="${p.id}.${l.key}" value="${(st.auto_limits?.[p.id]?.[l.key]) ?? l.default}"></label>`).join("")).join("")}</div>` : ""}
 
+    </details>
+
     <div class="row-actions"><button class="primary" id="saveSettings">Сохранить настройки</button></div>
 
     <h2>Установленные пакеты</h2>
     <table class="slots"><tbody>${S.boot.packages.map((p) => `<tr><td><b>${esc(p.name)}</b> <span class="hint">${esc(p.id)} ${esc(p.version || "")}</span><div class="hint">${esc(p.description)}</div></td>
       <td class="hint">${p.stage ? `шагов: ${p.stage.steps.length}` : "экран"}<br>банки: ${esc([...new Set([...(p.banks?.reads || []), ...(p.banks?.writes || [])])].join(", ") || "—")}</td></tr>`).join("")}</tbody></table>
     ${(S.boot.package_errors || []).map((e) => `<div class="err">${esc(e)}</div>`).join("")}`;
+  page.querySelector(".advanced").ontoggle = (e) => { advancedOpen = e.target.open; };
   page.querySelectorAll("[data-check]").forEach((button) => {
     button.onclick = () => act(async () => {
       const out = $("check-" + button.dataset.check);

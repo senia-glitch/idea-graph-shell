@@ -33,10 +33,10 @@ def stage_manifest():
         "stage": {
             "roots": "сфера", "hidden_edges": ["участвует"],
             "kinds": [{"kind": "роль", "title": "Роль", "color": "#e8833a", "fields": [{"name": "Важность", "values": ["низкая", "высокая"]}]}],
-            "steps": [{"id": "roles", "title": "Роли", "question": "Кто?", "produces": ["роль"], "needs": [],
-                       "prompts": {"suggest": "ПРЕДЛОЖИ-РОЛИ"}},
+            "steps": [{"id": "roles", "title": "Роли", "question": "Кто?", "produces": ["роль"], "needs": [], "phase": "Процессы",
+                       "label": "Предложить роли", "prompts": {"suggest": "ПРЕДЛОЖИ-РОЛИ", "review": "ПРОВЕРЬ-РОЛИ"}},
                       {"id": "comp", "title": "Конкуренты", "question": "Кто?", "produces": [], "produces_bank": "comp",
-                       "needs": [], "prompts": {"suggest": "ПРЕДЛОЖИ"}, "bank": {"name": "comp", "type": "competitor"}}],
+                       "needs": [], "phase": "Разведка", "prompts": {"suggest": "ПРЕДЛОЖИ"}, "bank": {"name": "comp", "type": "competitor"}}],
             "auto": {"targets": "сфера", "limits": [{"key": "n", "name": "Сколько", "default": 3}],
                      "note": lambda ctx, targets, limits, **kw: ""},
         },
@@ -51,7 +51,10 @@ def served(tmp_path):
     adapters = Adapters()
     adapters.add(ScriptAdapter())
     settings = Settings(tmp_path / "settings.json")
-    settings.data["default_slot"] = {"agent": "script", "model": "", "effort": ""}
+    for slot in ("default_slot", "reviewer"):
+        settings.data[slot] = {"agent": "script", "model": "", "effort": ""}
+    for roles in ("researchers", "advisers"):
+        settings.data[roles] = [{"agent": "script", "model": "", "effort": ""}] * 3
     app = App(settings, registry, adapters)
     server = make_server(app, 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -176,44 +179,10 @@ def test_mcp_bridge(served, tmp_path, monkeypatch):
 def test_public_manifest_exposes_stage_without_functions(served):
     item = next(p for p in http(served, "/api/boot")[1]["packages"] if p["id"] == "st")
     assert [s["id"] for s in item["stage"]["steps"]] == ["roles", "comp"]
-    assert item["stage"]["steps"][0]["actions"] == ["suggest"] and item["stage"]["steps"][1]["bank"]["name"] == "comp"
+    assert item["stage"]["steps"][0]["actions"] == ["suggest", "review"] and item["stage"]["steps"][1]["bank"]["name"] == "comp"
     assert item["stage"]["kinds"][0]["fields"][0]["name"] == "Важность" and item["stage"]["hidden_edges"] == ["участвует"]
     assert item["auto"] == {"targets": "сфера", "limits": [{"key": "n", "name": "Сколько", "default": 3}]}
     json.dumps(item)                                                      # ни одной функции в ответе
-
-
-def test_stage_gates_banks_and_proposals_through_http(served, tmp_path):
-    create_project(served, tmp_path)
-    ops(served, {"op": "add_card", "kind": "сфера", "title": "Клиники"})
-    ops(served, {"op": "add_card", "kind": "роль", "title": "Врач", "status": "proposed", "parent": "c1"})
-    state = http(served, "/api/stage?package=st")[1]
-    assert state["steps"][0]["proposed"] == 1 and state["steps"][0]["status"] == "open"
-    assert http(served, "/api/stage/approve", {"package": "st", "step": "roles"})[1]["error"] == "pending"
-    approved = http(served, "/api/stage/approve", {"package": "st", "step": "roles", "accept_all": True})[1]
-    assert approved["steps"][0]["status"] == "approved"
-    ops(served, {"op": "update_card", "id": "c2", "title": "Терапевт"})
-    assert http(served, "/api/state")[1]["stages"]["st"]["steps"][1]["status"] == "open"
-    assert http(served, "/api/stage/reopen", {"package": "st", "step": "roles"})[1]["steps"][0]["status"] == "open"
-    assert http(served, "/api/stage/clear-stale", {"package": "st", "step": "roles"})[0] == 200
-    assert http(served, "/api/stage?package=none")[0] == 400
-
-    code, saved = http(served, "/api/bank/save", {"name": "comp", "type": "competitor", "key": "a.example",
-                                                   "data": {"name": "Докдок"}, "sources": ["https://a.example"]})
-    assert code == 200 and saved["record"]["data"]["state"] == "accepted" and saved["record"]["author"] == "human"
-    code, edited = http(served, "/api/bank/save", {"name": "comp", "id": saved["record"]["id"], "data": {"name": "Докдок 2", "state": "proposed"}})
-    assert edited["record"]["data"]["name"] == "Докдок 2"
-    assert http(served, "/api/bank?name=comp")[1]["records"][0]["data"]["state"] == "proposed"
-    assert http(served, "/api/bank?name=comp&type=other")[1]["records"] == []
-    assert http(served, "/api/bank/remove", {"name": "comp", "id": saved["record"]["id"]})[0] == 200
-    assert http(served, "/api/bank?name=comp")[1]["records"] == []
-    assert http(served, "/api/bank?name=Bad%20name")[0] == 400
-
-    ops(served, {"op": "add_card", "kind": "правка", "title": "Правка: Терапевт", "status": "proposed",
-                 "attrs": {"target": "c2", "field": "title", "new": "Лор", "reason": "тест"}})
-    right = http(served, "/api/graph")[1]["cards"][-1]["id"]
-    assert http(served, "/api/proposals/apply", {"id": right})[0] == 200
-    titles = {c["id"]: c["title"] for c in http(served, "/api/graph")[1]["cards"]}
-    assert titles["c2"] == "Лор" and right not in titles
 
 
 def test_run_start_with_step_action_and_auto_through_http(served, tmp_path):
@@ -225,7 +194,7 @@ def test_run_start_with_step_action_and_auto_through_http(served, tmp_path):
         time.sleep(0.02)
     run = http(served, "/api/state")[1]["runs"]["st"]
     assert run["status"] == "finished" and run["step"] == "roles" and run["action"] == "suggest" and "ПРЕДЛОЖИ-РОЛИ" in run["summary"]
-    assert http(served, "/api/run/start", {"package": "st", "step": "roles", "action": "review"})[1]["error"] == "no_action"
+    assert http(served, "/api/run/start", {"package": "st", "step": "roles", "action": "clarify"})[1]["error"] == "no_action"
     assert http(served, "/api/run/start", {"package": "st", "auto": {"targets": ["c9"]}})[1]["error"] == "unknown_target"
     assert http(served, "/api/run/stop", {"package": "st"})[0] == 200
     assert http(served, "/api/run/propose", {"package": "st"})[0] == 200
@@ -244,19 +213,42 @@ def test_resources_api(served, tmp_path):
     assert http(served, "/api/resources")[1]["items"] == []
 
 
-def test_skip_part_goal_and_issues_through_http(served, tmp_path):
+
+def test_banks_proposals_goal_and_document_through_http(served, tmp_path):
     create_project(served, tmp_path)
     ops(served, {"op": "add_card", "kind": "сфера", "title": "Клиники"})
-    state = http(served, "/api/state")[1]["stages"]["st"]
-    assert state["skipped"] is False and state["steps"][0]["issues"] == [] and state["steps"][0]["runs"] == 0
-    assert http(served, "/api/stage/skip", {"package": "st", "skipped": True})[1]["skipped"] is True
-    assert http(served, "/api/state")[1]["stages"]["st"]["skipped"] is True
-    assert http(served, "/api/stage/skip", {"package": "none", "skipped": True})[0] == 400
-    assert http(served, "/api/run/start", {"package": "st", "step": "roles", "action": "suggest", "target": "c1",
-                                           "goal": "добавь врача"})[0] == 200
+    ops(served, {"op": "add_card", "kind": "роль", "title": "Врач", "parent": "c1"})
+    state = http(served, "/api/stage?package=st")[1]
+    assert [s["id"] for s in state["steps"]] == ["roles", "comp"] and "status" not in state["steps"][0]
+    assert http(served, "/api/stage?package=none")[0] == 400
+    ops(served, {"op": "update_card", "id": "c2", "title": "Терапевт"})
+    assert http(served, "/api/stage/clear-stale", {"package": "st", "step": "roles"})[0] == 200
+    assert http(served, "/api/stage/approve", {"package": "st", "step": "roles"})[0] == 400
+
+    code, saved = http(served, "/api/bank/save", {"name": "comp", "type": "competitor", "key": "a.example",
+                                                   "data": {"name": "Докдок"}, "sources": ["https://a.example"]})
+    assert code == 200 and saved["record"]["data"]["state"] == "accepted" and saved["record"]["author"] == "human"
+    code, edited = http(served, "/api/bank/save", {"name": "comp", "id": saved["record"]["id"], "data": {"name": "Докдок 2", "state": "proposed"}})
+    assert edited["record"]["data"]["name"] == "Докдок 2"
+    assert http(served, "/api/bank?name=comp")[1]["records"][0]["data"]["state"] == "proposed"
+    assert http(served, "/api/bank?name=comp&type=other")[1]["records"] == []
+    assert http(served, "/api/bank/remove", {"name": "comp", "id": saved["record"]["id"]})[0] == 200
+    assert http(served, "/api/bank?name=Bad%20name")[0] == 400
+
+    ops(served, {"op": "add_card", "kind": "правка", "title": "Правка: Терапевт", "status": "proposed",
+                 "attrs": {"target": "c2", "field": "title", "new": "Лор", "reason": "тест"}})
+    right = http(served, "/api/graph")[1]["cards"][-1]["id"]
+    assert http(served, "/api/proposals/apply", {"id": right})[0] == 200
+    assert {c["id"]: c["title"] for c in http(served, "/api/graph")[1]["cards"]}["c2"] == "Лор"
+
+    assert "# Запись к врачу" in http(served, "/api/document")[1]["markdown"]
+    saved_doc = http(served, "/api/document/save", {})[1]["path"]
+    assert saved_doc.endswith("Документ.md") and (tmp_path / "root" / "Запись к врачу" / "Документ.md").is_file()
+
+    assert http(served, "/api/run/start", {"package": "st", "phase": "Процессы", "action": "review"})[0] == 200
     deadline = time.time() + 5
     while time.time() < deadline and http(served, "/api/state")[1]["runs"]["st"]["status"] != "finished":
         time.sleep(0.02)
     run = http(served, "/api/state")[1]["runs"]["st"]
-    assert "ЧТО УЛУЧШИТЬ (задача человека): добавь врача" in run["summary"]
-    assert http(served, "/api/state")[1]["stages"]["st"]["steps"][0]["runs"] == 1
+    assert run["role"] == "reviewer" and "Крупный этап «Процессы»" in run["summary"]
+    assert http(served, "/api/run/start", {"package": "st", "phase": "Нет", "action": "review"})[1]["error"] == "no_action"

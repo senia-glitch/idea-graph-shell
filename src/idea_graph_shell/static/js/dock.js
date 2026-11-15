@@ -1,14 +1,16 @@
-/* Правая панель: пакеты и их запуск, вопрос с вариантами, чат, решения агента, история. */
+/* Правая панель «Помощник»: что дальше, действия крупного этапа, вопросы агента, чат; вкладки «Банк», «Ресурсы», «История».
+ *
+ * Всё, что здесь показано, объявили пакеты-этапы (шаги, подписи кнопок, банки, проверки): про конкретные этапы тут ничего нет.
+ */
 
-import {$, S, act, api, authorName, emit, esc, on, packageName, toast, when} from "./core.js";
-import {graphIndex, loadGraph} from "./graph.js";
+import {$, S, act, allSteps, api, emit, esc, on, packageName, phases, toast, when} from "./core.js";
+import {graphIndex, loadGraph, selectedCardId, setFocus} from "./graph.js";
 
-const D = {autoOpen: false, resources: null, autoTarget: "", tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}, picked: {}};
-
-const STATUS_TEXT = {
-  idle: "ждёт", running: "думает…", asking: "ждёт вашего ответа", deciding: "совет решает…",
-  finished: "закончил", error: "ошибка", stopped: "остановлен", paused: "на паузе", researching: "исследуют область…",
-};
+const D = {resources: null, tab: "help", history: null, historyRev: -1, draft: "", custom: {}, picked: {}, banks: {}, bankSeq: -1};
+const BUSY = ["running", "deciding", "researching"];
+const RUN_TEXT = {running: "помощник работает…", deciding: "совет решает…", researching: "исследователи ищут…", asking: "ждёт вашего ответа",
+  finished: "закончил", error: "ошибка", stopped: "остановлен", paused: "на паузе", idle: ""};
+const ISSUE_ICON = {pending: "◔", check: "•", remark: "✎", proposal: "↻", stale: "⚠"};
 
 /* Перерисовываем блок, только если он изменился: иначе кнопка может исчезнуть под курсором посреди щелчка. */
 function setHtml(el, html) {
@@ -17,10 +19,40 @@ function setHtml(el, html) {
   el.innerHTML = html;
 }
 
-function runnable() {
-  return (S.boot?.packages || []).filter((p) => p.kind === "agent" || p.kind === "code");
+const cardsOf = (kind) => [...graphIndex().cards.values()].filter((c) => c.kind === kind).sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+const runOf = (id) => S.project?.runs?.[id];
+const isBusy = (id) => BUSY.includes(runOf(id)?.status);
+
+// ---------------------------------------------------------------------- этап в фокусе
+
+/* Первый крупный этап, где ещё ничего нет; если всё заполнено — первый. */
+function defaultPhase(list) {
+  return (list.find((p) => p.steps.every(({st}) => !(st.cards || st.records))) || list[0])?.name || "";
 }
-function runOf(id) { return S.project?.runs?.[id]; }
+
+export function currentPhase() {
+  const list = phases();
+  if (!list.some((p) => p.name === S.phase)) S.phase = defaultPhase(list);
+  return list.find((p) => p.name === S.phase) || null;
+}
+
+export function phaseKinds(phase) {
+  const kinds = new Set();
+  for (const {pkg, step} of phase?.steps || []) {
+    step.produces.forEach((k) => kinds.add(k));
+    if (step.produces.includes(pkg.stage.roots)) kinds.add(pkg.stage.roots);
+  }
+  return kinds;
+}
+
+/* Цель действия: выбранная на холсте карточка нужного вида, иначе первая карточка этого вида. */
+function targetFor({pkg, step}) {
+  const kind = step.target_kind || pkg.stage.roots, cards = cardsOf(kind), sel = selectedCardId();
+  if (sel && cards.some((c) => c.id === sel)) return sel;
+  return kind === pkg.stage.roots && cards.length ? cards[0].id : "";
+}
+
+// ---------------------------------------------------------------------- ширина панели
 
 const DOCK_MIN = 320, DOCK_KEY = "ig-dock-width";
 const dockMax = () => Math.max(DOCK_MIN + 40, Math.min(900, Math.floor(window.innerWidth * 0.7)));
@@ -57,19 +89,13 @@ function initDockResize() {
 
 export function initDock() {
   $("dock").innerHTML = `
-    <div class="pkg-bar" id="pkgBar"></div>
-    <div class="pkg-ctl" id="pkgCtl"></div>
     <div class="dock-tabs" id="dockTabs"></div>
     <div class="dock-body" id="dockBody"></div>
     <form class="chat-form" id="chatForm">
-      <textarea id="chatInput" rows="2" placeholder="Сообщение агенту… (Enter — отправить)"></textarea>
-      <button class="primary" title="Отправить">➤</button>
+      <textarea id="chatInput" rows="2" placeholder="Что нужно (необязательно)… Enter — написать помощнику"></textarea>
+      <button class="primary" title="Отправить сообщение помощнику">➤</button>
     </form>`;
   initDockResize();
-  $("pkgBar").onclick = (e) => {
-    const id = e.target.closest("[data-pkg]")?.dataset.pkg;
-    if (id) { S.pkg = id; renderDock(); }
-  };
   $("dockTabs").onclick = (e) => {
     const tab = e.target.dataset.tab;
     if (tab) { D.tab = tab; $("dockBody").dataset.fresh = ""; renderDock(); }
@@ -79,61 +105,32 @@ export function initDock() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
   on("state", renderDock);
-  on("graph", () => { if (D.tab !== "chat") renderBody(); });
+  on("select", () => { if (D.tab === "help") renderDock(); });
+  on("graph", () => { if (D.tab !== "help") renderBody(); else renderDock(); });
 }
 
+/* Сообщение уходит пакету текущего этапа; если помощник сейчас не запущен, он продолжит с этим сообщением. */
 function sendMessage() {
   const input = $("chatInput"), text = input.value.trim();
   if (!text) return;
-  if (!S.pkg) return toast("Выберите пакет, которому адресовано сообщение");
-  if (packageKind(S.pkg) !== "agent") return toast("Этот пакет работает без модели — писать ему незачем");
+  const first = currentPhase()?.steps[0];
+  if (!first) return toast("Нет установленного этапа, которому адресовано сообщение");
   input.value = "";
-  act(async () => { await api("/api/run/message", {package: S.pkg, text}); emit("poll"); });
+  act(async () => { await api("/api/run/message", {package: first.pkg.id, text}); emit("poll"); });
 }
-function packageKind(id) { return S.boot?.packages.find((p) => p.id === id)?.kind; }
 
 export function renderDock() {
   if (!S.project) return;
-  const list = runnable();
-  if (!S.pkg || !list.some((p) => p.id === S.pkg)) S.pkg = list[0]?.id || "";
-  setHtml($("pkgBar"), list.map((p) => {
-    const run = runOf(p.id), status = run?.status || "idle";
-    return `<button class="pkg${p.id === S.pkg ? " on" : ""}" data-pkg="${p.id}" title="${esc(p.description)}">
-      <span class="dot s-${status}"></span>${esc(p.name)}</button>`;
-  }).join("") || '<div class="hint">Пакеты не установлены. Поставьте idea-graph-problem и перезапустите оболочку.</div>');
-  renderControls();
+  const phase = currentPhase();
+  setFocus(phaseKinds(phase));
   const questions = openQuestions().length;
-  const decided = decisionCards().filter((c) => c.decision.by !== "human").length;
-  setHtml($("dockTabs"), [["chat", "Чат" + (questions ? ` · ${questions} ?` : "")], ["decisions", "Решения совета" + (decided ? ` · ${decided}` : "")], ...(S.boot.packages.some((p) => p.research) ? [["resources", "Ресурсы" + (D.resources ? ` · ${D.resources.length}` : "")]] : []), ["history", "История"]]
+  const hasBank = allSteps().some(({step}) => step.bank);
+  const hasResearch = S.boot.packages.some((p) => p.research);
+  setHtml($("dockTabs"), [["help", "Помощник" + (questions ? ` · ${questions} ?` : "")], ...(hasBank ? [["bank", "Банк"]] : []),
+    ...(hasResearch ? [["resources", "Ресурсы" + (D.resources ? ` · ${D.resources.length}` : "")]] : []), ["history", "История"]]
     .map(([id, name]) => `<button data-tab="${id}" class="${D.tab === id ? "on" : ""}">${name}</button>`).join(""));
-  $("chatForm").hidden = D.tab !== "chat";
+  $("chatForm").hidden = D.tab !== "help";
   renderBody();
-}
-
-function renderControls() {
-  const box = $("pkgCtl"), pkg = S.boot.packages.find((p) => p.id === S.pkg);
-  if (!pkg) { setHtml(box, ""); return; }
-  const run = runOf(pkg.id), status = run?.status || "idle";
-  const busy = status === "running" || status === "deciding" || status === "researching";
-  const started = run && run.turn > 0;
-  setHtml(box, `
-    <div class="ctl-row">
-      <span class="status s-${status}">${STATUS_TEXT[status] || status}</span>
-      ${run?.auto ? '<span class="chip" title="Работает автоматический режим: вопросов не будет">авто</span>' : ""}
-      ${run?.turn ? `<span class="hint">ходов: ${run.turn}${run.cost ? ` · $${run.cost.toFixed(3)}` : ""}</span>` : ""}
-      <span class="spacer"></span>
-      ${busy ? '<button data-do="stop">■ Стоп</button>'
-        : `<button class="primary" data-do="start">${started && pkg.kind === "agent" && status !== "finished" ? "▶ Продолжить" : "▶ Запустить"}</button>`}
-      ${started && !busy && pkg.kind === "agent" ? '<button data-do="fresh" title="Начать с новой сессией агента: он получит весь граф заново">Заново</button>' : ""}
-    </div>
-    ${run?.error ? `<div class="err">${esc(run.error)}</div>` : ""}
-    ${status === "finished" && run.outcome ? `<div class="hint">Итог: <b>${esc(run.outcome)}</b></div>` : ""}`);
-  box.onclick = (e) => {
-    const todo = e.target.dataset.do;
-    if (todo === "start") act(async () => { await api("/api/run/start", {package: pkg.id}); emit("poll"); });
-    if (todo === "fresh") act(async () => { await api("/api/run/start", {package: pkg.id, fresh: true}); emit("poll"); });
-    if (todo === "stop") act(async () => { await api("/api/run/stop", {package: pkg.id}); emit("poll"); });
-  };
 }
 
 // ---------------------------------------------------------------------- вопросы
@@ -143,7 +140,7 @@ function openQuestions() {
   for (const run of Object.values(S.project?.runs || {})) {
     if (run.question && run.status === "asking") out.push({...run.question, deferred: false});
   }
-  return out.sort((a, b) => (a.package === S.pkg ? -1 : 0) - (b.package === S.pkg ? -1 : 0));
+  return out;
 }
 
 export function questionHtml(q) {
@@ -156,8 +153,7 @@ export function questionHtml(q) {
   const cards = (q.cards || []).concat(q.revisits || []).filter((v, i, a) => a.indexOf(v) === i);
   const index = graphIndex();
   return `<div class="question" data-qbox="${q.id}">
-    <div class="qhead"><span class="chip">${esc(packageName(q.package))}</span>
-</div>
+    <div class="qhead"><span class="chip">${esc(packageName(q.package))}</span></div>
     ${q.comment ? `<div class="qcomment">${esc(q.comment)}</div>` : ""}
     <div class="qtext">${esc(q.question)}</div>
     ${cards.length ? `<div class="qcards">${cards.filter((id) => index.cards.has(id)).map((id) => `<a href="#" data-card="${id}">${esc(index.cards.get(id).title)}</a>`).join("")}</div>` : ""}
@@ -207,6 +203,14 @@ export function bindQuestions(body) {
 
 // ---------------------------------------------------------------------- тело панели
 
+function renderBody() {
+  const body = $("dockBody");
+  if (D.tab === "help") return renderHelp(body);
+  if (D.tab === "bank") return renderBank(body);
+  if (D.tab === "resources") return renderResources(body);
+  return renderHistory(body);
+}
+
 function chatLine(m) {
   const who = m.who === "human" ? "Вы" : m.who === "agent" ? packageName(m.package) : m.who === "council" ? "Совет" : "Система";
   let text = esc(m.text);
@@ -223,57 +227,229 @@ function chatLine(m) {
   return `<div class="msg w-${m.who} k-${m.kind}"><div class="mhead"><b>${esc(who)}</b><span class="hint">${when(m.ts)}</span></div><div class="mtext">${text}</div></div>`;
 }
 
-function decisionCards() {
-  return [...graphIndex().cards.values()].filter((c) => c.decision && typeof c.decision === "object" && c.decision.chosen);
+function runLine(phase) {
+  const ids = [...new Set((phase?.steps || []).map(({pkg}) => pkg.id))];
+  return ids.map((id) => {
+    const run = runOf(id);
+    if (!run || run.status === "idle") return "";
+    const step = run.step && phase.steps.find(({step: s}) => s.id === run.step)?.step;
+    const what = run.auto ? "автоматический режим" : run.role === "proposer" ? "предложение правок" : run.role === "reviewer" ? "ревью" : "помощник";
+    return `<div class="runline s-${run.status}"><span class="status s-${run.status}">${esc(RUN_TEXT[run.status] || run.status)}</span>
+      <span class="hint">${esc(what)}${step ? ` · «${esc(step.title)}»` : ""}${run.cost ? ` · $${run.cost.toFixed(3)}` : ""}</span>
+      ${run.error ? `<div class="err">${esc(run.error)}</div>` : ""}
+      ${run.status === "finished" && run.summary ? `<div class="hint">${esc(run.summary.replace(/\s+/g, " ").slice(0, 200))}</div>` : ""}
+      <span class="spacer"></span>${BUSY.includes(run.status) || run.status === "asking" ? `<button data-do="stop" data-pkg="${id}">■ Стоп</button>` : ""}</div>`;
+  }).join("");
 }
 
-function renderBody() {
-  const body = $("dockBody");
-  if (D.tab === "chat") return renderChat(body);
-  if (D.tab === "decisions") return renderDecisions(body);
-  if (D.tab === "resources") return renderResources(body);
-  return renderHistory(body);
+/* «Что дальше»: всё, что ждёт решения человека на этом этапе, и подсказка следующего действия. */
+function nextBlock(phase, questions) {
+  const rows = [];
+  let pending = 0, decide = 0;
+  for (const {pkg, step, st} of phase?.steps || []) {
+    pending += (st.proposed || 0) + (st.records_proposed || 0);
+    for (const issue of st.issues || []) {
+      if (issue.type === "pending") continue;
+      if (issue.type !== "check") decide++;
+      const buttons = [];
+      if (issue.type === "remark") buttons.push(`<button data-show="${issue.card}">Показать</button><button class="danger" data-del="${issue.card}" title="Учтено: убрать замечание">✕</button>`);
+      if (issue.type === "proposal") buttons.push(`<button data-apply="${issue.card}">✓ Применить</button><button class="danger" data-del="${issue.card}" title="Отклонить правку">✕</button>`);
+      if (issue.type === "stale") buttons.push(`<button data-stale="propose" data-pkg="${pkg.id}" data-step="${step.id}">Предложить правки</button><button data-stale="clear" data-pkg="${pkg.id}" data-step="${step.id}">Игнорировать</button>`);
+      rows.push(`<li class="issue t-${issue.type}"><span class="i-icon">${ISSUE_ICON[issue.type] || "•"}</span>
+        <span class="i-text">${esc(issue.text)}${issue.type === "stale" || issue.type === "check" ? ` <span class="hint">· ${esc(step.title)}</span>` : ""}</span><span class="i-act">${buttons.join("")}</span></li>`);
+    }
+  }
+  const stepsWithLabel = (phase?.steps || []).filter(({step}) => step.actions.includes("suggest"));
+  const empty = stepsWithLabel.find(({st}) => !(st.cards || st.records));
+  const busy = (phase?.steps || []).some(({pkg}) => isBusy(pkg.id));
+  let hint = "";
+  if (questions) hint = "Агент ждёт вашего ответа — вопрос выше.";
+  else if (busy) hint = "Помощник работает: результат появится на холсте.";
+  else if (decide || pending) hint = "Разберите предложенное: примите, поправьте на холсте или уберите лишнее.";
+  else if (empty) hint = `Дальше: «${empty.step.label || empty.step.title}».`;
+  else hint = phase ? "Этап выглядит заполненным. Можно проверить его или перейти к следующему." : "";
+  return `<div class="next-box"><div class="lbl">Что дальше</div>
+    ${hint ? `<div class="next-hint">${esc(hint)}</div>` : ""}
+    ${pending ? `<div class="row-actions" style="justify-content:flex-start"><button data-accept-all>Принять все непринятое · ${pending}</button></div>` : ""}
+    ${rows.length ? `<ul class="issues">${rows.join("")}</ul>` : ""}</div>`;
 }
 
-const stagePkg = (id) => S.boot?.packages.find((p) => p.id === id)?.stage;
-
-/* На вкладке «Карта этапа» вопрос агента отвечается в рабочей области шага; здесь — только напоминание. */
-function questionNotice(q) {
-  const run = S.project?.runs?.[q.package];
-  const step = run?.step && stagePkg(q.package)?.steps.find((s) => s.id === run.step);
-  return `<div class="qnotice"><span>Агент ждёт вашего ответа${step ? ` на шаге «${esc(step.title)}»` : ""}: <b>${esc(q.question)}</b></span>
-    ${step ? `<button class="primary" data-goto-step="${esc(step.id)}" data-pkg="${esc(q.package)}">Открыть шаг</button>` : ""}</div>`;
-}
-
-function renderChat(body) {
-  const typing = body.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
-  const questions = openQuestions();
-  const signature = JSON.stringify([S.chat.length, S.chat.at(-1)?.seq, questions.map((q) => q.id + q.deferred), JSON.stringify(D.picked), !!S.inlineQuestions, S.pkg, graphIndex().cards.size, Object.values(S.project.runs).map((r) => r.status)]);
-  if (body.dataset.sig === signature && body.dataset.tab === "chat") return;
-  if (typing && body.dataset.tab === "chat" && JSON.stringify(questions.map((q) => q.id)) === body.dataset.qs) return;   // не сбиваем ввод своего ответа
-  const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 60 || body.dataset.tab !== "chat";
-  const busy = Object.values(S.project.runs).filter((r) => r.status === "running" || r.status === "deciding" || r.status === "researching");
-  body.onclick = null;
-  body.dataset.sig = signature;
-  body.dataset.tab = "chat";
-  body.dataset.qs = JSON.stringify(questions.map((q) => q.id));
-  body.innerHTML =
-    (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).map(chatLine).join("") : '<div class="empty">Напишите сферу бизнеса («+ Сфера» вверху) и откройте «Карту этапа»: у каждого шага есть помощник — предложить, проверить, уточнить. Вопросы агента появятся здесь, с готовыми вариантами ответа.</div>') +
-    busy.map((r) => `<div class="thinking">${esc(packageName(r.package))}: ${r.status === "deciding" ? "совет решает" : r.status === "researching" ? "исследователи ищут информацию" : "агент думает"}<span class="dots"></span></div>`).join("") +
-    questions.map((q) => (S.inlineQuestions && stagePkg(q.package) ? questionNotice(q) : questionHtml(q))).join("");
-  bindQuestions(body);
-  body.querySelectorAll("[data-goto-step]").forEach((button) => {
-    button.onclick = () => emit("goto-map", {package: button.dataset.pkg, step: button.dataset.gotoStep});
+function actionsBlock(phase) {
+  if (!phase) return "";
+  const steps = phase.steps;
+  const buttons = steps.filter(({step}) => step.actions.includes("suggest")).map((item) => {
+    const busy = isBusy(item.pkg.id), noTarget = !targetFor(item) && (item.step.target_kind || item.pkg.stage.roots) === item.pkg.stage.roots;
+    return `<button class="${item.st.cards || item.st.records ? "" : "primary"}" data-go="suggest" data-pkg="${item.pkg.id}" data-step="${item.step.id}"${busy || noTarget ? " disabled" : ""}
+      title="${esc(item.step.help || item.step.question)}">${esc(item.step.label || "Предложить: " + item.step.title)}</button>`;
   });
-  if (stick) body.scrollTop = body.scrollHeight;
-  const current = questions.find((q) => !q.deferred) || questions[0];
+  const owner = steps[0].pkg.id, busy = isBusy(owner);
+  const can = (action) => steps.some(({step}) => step.actions.includes(action));
+  const auto = steps.map(({pkg}) => pkg).find((p) => p.auto);
+  const missingRoot = steps.some(({pkg, step}) => step.produces.includes(pkg.stage.roots) && !step.actions.includes("suggest")) && !cardsOf(steps[0].pkg.stage.roots).length;
+  return `<div class="act-box"><div class="lbl">Этап «${esc(phase.name)}»</div>
+    ${missingRoot ? '<div class="ws-warn">Первую карточку пишете вы: кнопка «+ Сфера» вверху.</div>' : ""}
+    <div class="act-buttons">${buttons.join("")}</div>
+    <div class="act-buttons">
+      ${can("review") ? `<button data-go="review" data-pkg="${owner}" data-phase="1"${busy ? " disabled" : ""} title="Независимый ревьюер оставит замечания карточками; ничего не правит">Проверить этап</button>` : ""}
+      ${can("clarify") ? `<button data-go="clarify" data-pkg="${owner}" data-phase="1"${busy ? " disabled" : ""} title="Помощник найдёт неточности и задаст вопросы с вариантами">Уточнить</button>` : ""}
+      ${auto ? `<button data-auto="${auto.id}"${isBusy(auto.id) ? " disabled" : ""} title="Помощник проходит все шаги сам, на развилках решает совет. Результат остаётся предложенным">⚡ Авто</button>` : ""}
+      ${steps.some(({pkg}) => isBusy(pkg.id)) ? `<button data-do="stop" data-pkg="${owner}">■ Стоп</button>` : ""}</div>
+    <div class="hint">Текст в поле внизу — уточнение к действию («добавь роль врача»). Цель — выбранная на холсте карточка.</div></div>`;
+}
+
+function renderHelp(body) {
+  const typing = body.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
+  const phase = currentPhase(), questions = openQuestions();
+  const signature = JSON.stringify([S.chat.length, S.chat.at(-1)?.seq, questions.map((q) => q.id), D.picked, S.phase, selectedCardId(),
+    JSON.stringify(S.project.runs), JSON.stringify(S.project.stages), graphIndex().cards.size]);
+  if (body.dataset.sig === signature && body.dataset.tab === "help") return;
+  if (typing && body.dataset.tab === "help" && JSON.stringify(questions.map((q) => q.id)) === body.dataset.qs) return;   // не сбиваем ввод своего ответа
+  const sameTab = body.dataset.tab === "help", newQuestion = sameTab && JSON.stringify(questions.map((q) => q.id)) !== body.dataset.qs;
+  const keep = sameTab ? body.scrollTop : 0;
+  body.dataset.sig = signature;
+  body.dataset.tab = "help";
+  body.dataset.qs = JSON.stringify(questions.map((q) => q.id));
+  body.innerHTML = runLine(phase) +
+    questions.map(questionHtml).join("") + nextBlock(phase, questions.length) + actionsBlock(phase) +
+    '<div class="lbl chat-lbl">Разговор (новое сверху)</div>' +
+    (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).slice(-12).reverse().map(chatLine).join("")
+      : '<div class="empty">Напишите сферу («+ Сфера» вверху), затем нажимайте кнопки этапа: помощник предлагает, вы принимаете и правите. Вопросы агента появятся здесь с готовыми вариантами.</div>');
+  bindQuestions(body);
+  body.onclick = helpClick;
+  body.onchange = body.onsubmit = null;
+  body.scrollTop = newQuestion || !sameTab ? 0 : keep;
+  const current = questions[0];
   emit("highlight", current ? (current.cards || []).concat(current.revisits || []) : []);
 }
+
+async function acceptAll(phase) {
+  const ops = [];
+  for (const {step} of phase.steps) {
+    for (const kind of step.produces) cardsOf(kind).filter((c) => c.status === "proposed").forEach((c) => ops.push({op: "update_card", id: c.id, status: "accepted"}));
+  }
+  if (ops.length) await api("/api/ops", {ops, note: `Принято предложенное на этапе «${phase.name}»`});
+  for (const {step} of phase.steps) {
+    const name = step.produces_bank || step.bank?.name;
+    if (!name) continue;
+    const data = await api("/api/bank?name=" + encodeURIComponent(name));
+    for (const record of data.records.filter((r) => (r.data || {}).state === "proposed")) {
+      await api("/api/bank/save", {name, id: record.id, data: {...record.data, state: "accepted"}});
+    }
+  }
+  await loadGraph();
+  emit("poll");
+}
+
+function helpClick(e) {
+  if (e.target.closest(".question")) return;                                    // вопрос агента обрабатывает свой обработчик
+  const el = e.target.closest("button, a");
+  if (!el) return;
+  const d = el.dataset, phase = currentPhase();
+  if (el.matches("a")) e.preventDefault();
+  if (d.go) {
+    const goal = $("chatInput").value.trim();
+    const item = phase.steps.find(({pkg, step}) => pkg.id === d.pkg && (d.step ? step.id === d.step : true));
+    const payload = d.phase ? {package: d.pkg, action: d.go, phase: phase.name, goal}
+      : {package: d.pkg, step: d.step, action: d.go, target: targetFor(item), goal};
+    act(async () => { await api("/api/run/start", payload); $("chatInput").value = ""; emit("poll"); });
+  } else if (d.auto) {
+    const pkg = S.boot.packages.find((p) => p.id === d.auto), sel = selectedCardId();
+    const targets = sel && graphIndex().cards.get(sel)?.kind === pkg.auto.targets ? [sel] : [];
+    act(async () => { await api("/api/run/start", {package: d.auto, auto: {targets}}); emit("poll"); });
+  } else if (d.do === "stop") {
+    act(async () => { await api("/api/run/stop", {package: d.pkg}); emit("poll"); });
+  } else if (d.show) {
+    emit("reveal", d.show);
+  } else if (d.apply) {
+    act(async () => { await api("/api/proposals/apply", {id: d.apply}); await loadGraph(); toast("Правка применена"); emit("poll"); });
+  } else if (d.del) {
+    act(async () => { await api("/api/ops", {ops: [{op: "delete_card", id: d.del}]}); await loadGraph(); emit("poll"); });
+  } else if (d.stale) {
+    act(async () => {
+      if (d.stale === "propose") await api("/api/run/propose", {package: d.pkg});
+      else await api("/api/stage/clear-stale", {package: d.pkg, step: d.step});
+      emit("poll");
+    });
+  } else if ("acceptAll" in d) {
+    act(() => acceptAll(phase));
+  }
+}
+
+// ---------------------------------------------------------------------- банк
+
+function needBanks(names) {
+  const stamp = S.project.seq;
+  if (D.bankSeq === stamp && names.every((n) => D.banks[n])) return true;
+  D.bankSeq = stamp;
+  Promise.all(names.map((n) => api("/api/bank?name=" + encodeURIComponent(n)).then((r) => { D.banks[n] = r.records; }))).then(() => {
+    if (D.tab === "bank") { $("dockBody").dataset.sig = ""; renderBody(); }
+  }).catch(() => {});
+  return names.every((n) => D.banks[n]);
+}
+
+function bankTable(spec) {
+  const data = D.banks[spec.name], fields = spec.fields || [];
+  const cell = (record, f) => {
+    const value = (record.data || {})[f.key];
+    if (f.list) return `<span class="hint">${esc((Array.isArray(value) ? value : []).map((x) => (typeof x === "object" ? x.name : x)).join(", ").slice(0, 160) || "—")}</span>`;
+    if (f.values) return `<select data-bank-field="${f.key}" data-bank="${spec.name}" data-id="${record.id}">${["", ...f.values].map((v) => `<option${(value || "") === v ? " selected" : ""}>${esc(v)}</option>`).join("")}</select>`;
+    return `<input data-bank-field="${f.key}" data-bank="${spec.name}" data-id="${record.id}" value="${esc(value ?? "")}">`;
+  };
+  const rows = data.map((r) => `<tr class="${(r.data || {}).state === "proposed" ? "proposed" : ""}">
+    ${fields.map((f) => `<td>${cell(r, f)}</td>`).join("")}
+    <td class="bank-src">${(r.sources || []).slice(0, 3).map((s) => (/^https?:/i.test(s) ? `<a href="${esc(s)}" target="_blank" rel="noopener">источник</a>` : esc(s))).join(" ") || '<span class="hint">без источника</span>'}</td>
+    <td class="bank-act">${(r.data || {}).state === "proposed" ? `<button data-bank-accept="${r.id}" data-bank="${spec.name}" title="Принять запись">✓</button>` : '<span class="hint">принято</span>'}<button class="danger" data-bank-del="${r.id}" data-bank="${spec.name}" title="Удалить запись">✕</button></td></tr>`).join("");
+  const add = fields.filter((f) => !f.list).map((f) => f.values
+    ? `<select data-new="${f.key}">${f.values.map((v) => `<option>${esc(v)}</option>`).join("")}</select>`
+    : `<input data-new="${f.key}" placeholder="${esc(f.title)}">`).join("");
+  return `<table class="bank"><thead><tr>${fields.map((f) => `<th>${esc(f.title)}</th>`).join("")}<th>Источники</th><th></th></tr></thead><tbody>${rows
+    || `<tr><td colspan="${fields.length + 2}" class="hint">Записей пока нет. Нажмите кнопку этапа или добавьте вручную.</td></tr>`}</tbody></table>
+    ${fields.some((f) => !f.list) ? `<form class="bank-add" data-bank-form="${spec.name}" data-type="${esc(spec.type || "")}">${add}<button class="primary">Добавить</button></form>` : ""}`;
+}
+
+function renderBank(body) {
+  const typing = body.contains(document.activeElement) && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
+  if (typing && body.dataset.tab === "bank") return;
+  const specs = [], seen = new Set();
+  for (const {step} of allSteps()) if (step.bank && !seen.has(step.bank.name)) { seen.add(step.bank.name); specs.push({...step.bank, title: step.title}); }
+  body.dataset.tab = "bank";
+  body.dataset.sig = "";
+  if (!needBanks(specs.map((s) => s.name))) { body.innerHTML = '<div class="hint">Загружаю банк…</div>'; return; }
+  body.innerHTML = '<div class="hint">Здесь лежат найденные факты с источниками. Предложенное агентами нужно принять (✓) — только принятое попадает в документ без пометки.</div>' +
+    specs.map((s) => `<h3 class="bank-title">${esc(s.title)}</h3>${bankTable(s)}`).join("");
+  body.onclick = (e) => {
+    const el = e.target.closest("button");
+    if (!el || e.target.closest("select, input")) return;
+    const d = el.dataset, name = d.bank;
+    const record = (D.banks[name] || []).find((r) => r.id === (d.bankAccept || d.bankDel));
+    if (d.bankAccept && record) act(async () => { await api("/api/bank/save", {name, id: record.id, data: {...record.data, state: "accepted"}}); D.bankSeq = -1; emit("poll"); });
+    if (d.bankDel) act(async () => { await api("/api/bank/remove", {name, id: d.bankDel}); D.bankSeq = -1; emit("poll"); });
+  };
+  body.onchange = (e) => {
+    const t = e.target;
+    if (!t.dataset.bankField) return;
+    const record = (D.banks[t.dataset.bank] || []).find((r) => r.id === t.dataset.id);
+    if (record) act(async () => { await api("/api/bank/save", {name: t.dataset.bank, id: record.id, data: {...record.data, [t.dataset.bankField]: t.value}}); D.bankSeq = -1; emit("poll"); });
+  };
+  body.onsubmit = (e) => {
+    const form = e.target.closest("[data-bank-form]");
+    if (!form) return;
+    e.preventDefault();
+    const data = {};
+    form.querySelectorAll("[data-new]").forEach((el) => { data[el.dataset.new] = el.value.trim(); });
+    if (!Object.values(data).some(Boolean)) return;
+    const slug = String(data.url || data.name || "").toLowerCase().replace(/^[a-z]+:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+    act(async () => { await api("/api/bank/save", {name: form.dataset.bankForm, type: form.dataset.type, key: slug, data}); D.bankSeq = -1; emit("poll"); });
+  };
+}
+
+// ---------------------------------------------------------------------- ресурсы и история
 
 async function renderResources(body) {
   if (body.dataset.tab === "resources" && D.resources && body.dataset.fresh === "1") return;   // не стираем ввод ссылки
   body.dataset.tab = "resources";
   body.dataset.sig = "";
+  body.onclick = body.onchange = body.onsubmit = null;
   if (!D.resources) {
     const data = await act(() => api("/api/resources"));
     if (!data) return;
@@ -299,33 +475,10 @@ async function renderResources(body) {
   };
 }
 
-function renderDecisions(body) {
-  body.dataset.tab = "decisions";
-  body.dataset.sig = "";
-  const all = decisionCards();
-  const filters = {all: () => true, agent: (c) => c.decision.by !== "human", assumption: (c) => c.decision.assumption, disputed: (c) => c.decision.disputed};
-  const names = {all: "Все", agent: "Решил агент", assumption: "Допущения", disputed: "После спора"};
-  const list = all.filter(filters[D.filter]).sort((a, b) => b.updated_rev - a.updated_rev);
-  body.innerHTML = `<div class="filters">${Object.keys(filters).map((key) =>
-    `<button data-filter="${key}" class="${D.filter === key ? "on" : ""}">${names[key]} · ${all.filter(filters[key]).length}</button>`).join("")}</div>` +
-    (list.map((c) => {
-      const d = c.decision, chosen = d.chosen;
-      const what = chosen.type === "rejected" ? "отклонено" : chosen.value;
-      return `<a href="#" class="decision-row" data-card="${c.id}"><b>${esc(c.title)}</b>
-        <span>${esc(d.question || "")} → <b>${esc(what)}</b></span>
-        <span class="hint">${esc(authorName(d.by))}${d.assumption ? " · допущение" : ""}${d.disputed ? " · после спора" : ""}${d.overridden ? " · переопределено вами" : ""}</span>
-        ${d.rationale ? `<span class="rationale">${esc(d.rationale)}</span>` : ""}</a>`;
-    }).join("") || '<div class="empty">Здесь появятся решения, записанные на карточках. Решение агента можно открыть и переопределить.</div>');
-  body.onclick = (e) => {
-    const filter = e.target.dataset.filter, row = e.target.closest("[data-card]");
-    if (filter) { D.filter = filter; renderDecisions(body); }
-    if (row) { e.preventDefault(); emit("reveal", row.dataset.card); }
-  };
-}
-
 async function renderHistory(body) {
   body.dataset.tab = "history";
   body.dataset.sig = "";
+  body.onchange = body.onsubmit = null;
   if (D.historyRev !== S.project.revision || !D.history) {
     const data = await act(() => api("/api/history"));
     if (!data) return;
@@ -348,4 +501,11 @@ async function renderHistory(body) {
     const rev = e.target.dataset.undo;
     if (rev) act(async () => { await api("/api/undo", {rev: Number(rev)}); await loadGraph(); D.historyRev = -1; emit("poll"); toast("Готово"); });
   };
+}
+
+export function selectPhase(name) {
+  S.phase = name;
+  D.tab = "help";
+  $("dockBody").dataset.sig = "";
+  renderDock();
 }
