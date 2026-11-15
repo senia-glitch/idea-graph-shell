@@ -54,6 +54,8 @@ export function initGraph() {
     onEdgeSelect: () => {},
   });
   $("fitBtn").onclick = () => canvas.fit();
+  $("composeBtn").onclick = () => { if (canvas.compose()) $("undoComposeBtn").style.display = ""; };
+  $("undoComposeBtn").onclick = () => { canvas.undoCompose(); $("undoComposeBtn").style.display = "none"; };
 }
 
 function scheduleSave() {

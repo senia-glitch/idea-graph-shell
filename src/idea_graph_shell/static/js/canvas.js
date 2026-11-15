@@ -227,6 +227,69 @@ export function createCanvas(host, opts) {
     return moved;
   }
 
+  // ------------------------------------------------------------------ композиция узлов
+  /* Дерево слева направо: потомки — колонкой справа от родителя, родитель по центру своих потомков,
+     ветки не наезжают друг на друга. У узла с несколькими родителями «главный» — первый. */
+  let undoPos = null;
+  function compose() {
+    if (!S.nodes.length) return false;
+    measure();
+    const ids = S.nodes.map((n) => n.id), known = new Set(ids);
+    const order = new Map(ids.map((id, i) => [id, i]));
+    const at = (id) => S.pos.get(id) || {x: 0, y: 0};
+    const parentOf = new Map(), kids = new Map(ids.map((id) => [id, []]));
+    for (const id of ids) {
+      const p = (opts.parentsOf?.(id) || []).find((x) => known.has(x) && x !== id);
+      if (p) parentOf.set(id, p);
+    }
+    for (const id of ids) {                       // разорвать циклы: узел, чей путь вверх замкнулся, становится корнем
+      const seen = new Set([id]);
+      for (let p = parentOf.get(id); p; p = parentOf.get(p)) {
+        if (seen.has(p)) { parentOf.delete(id); break; }
+        seen.add(p);
+      }
+    }
+    for (const [id, p] of parentOf) kids.get(p).push(id);
+    const byPlace = (a, b) => at(a).y - at(b).y || order.get(a) - order.get(b);
+    for (const list of kids.values()) list.sort(byPlace);
+    const roots = ids.filter((id) => !parentOf.has(id)).sort((a, b) => at(a).x - at(b).x || byPlace(a, b));
+    const h = (id) => S.boxes[id]?.h || S.heights.get(id) || 110;
+    const STEP_X = W + 70, STEP_Y = 22;
+    const span = new Map();
+    const measureSpan = (id) => {
+      const list = kids.get(id);
+      const inner = list.reduce((s, c) => s + measureSpan(c), 0) + Math.max(0, list.length - 1) * STEP_Y;
+      const total = Math.max(h(id), inner);
+      span.set(id, total);
+      return total;
+    };
+    undoPos = new Map([...S.pos].map(([id, p]) => [id, {...p}]));
+    const next = new Map();
+    const put = (id, x, top) => {
+      const list = kids.get(id), total = span.get(id);
+      const inner = list.reduce((s, c) => s + span.get(c), 0) + Math.max(0, list.length - 1) * STEP_Y;
+      next.set(id, {x, y: Math.round(top + (total - h(id)) / 2)});
+      let y = top + (total - inner) / 2;
+      for (const c of list) { put(c, x + STEP_X, y); y += span.get(c) + STEP_Y; }
+    };
+    let top = 42;
+    for (const r of roots) { measureSpan(r); put(r, 44, top); top += span.get(r) + 40; }
+    for (const [id, p] of next) S.pos.set(id, p);
+    draw();
+    fit();
+    S.viewTouched = false;
+    opts.onMoved?.();
+    return true;
+  }
+  function undoCompose() {
+    if (!undoPos) return false;
+    for (const [id, p] of undoPos) if (S.pos.has(id)) S.pos.set(id, p);
+    undoPos = null;
+    draw();
+    opts.onMoved?.();
+    return true;
+  }
+
   // ------------------------------------------------------------------ перетаскивание
   function bindDrag(el, onMove, onEnd) {
     el.addEventListener("pointerdown", (event) => {
@@ -435,6 +498,8 @@ export function createCanvas(host, opts) {
   return {
     state: S,
     draw,
+    compose,
+    undoCompose,
     fit() { S.viewTouched = false; fit(); },   // «Вписать»: вид снова следует за графом
     setData(nodes, edges) {
       const known = new Set(nodes.map((n) => n.id));
