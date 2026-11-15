@@ -5,10 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "idea-graph-shell"
 version = "0.1.0"
-description = "Оболочка графа идеи: холст, чат, настройки агентов, запуск пакетов"
+description = "Оболочка «Графа идеи»: веб-интерфейс (холст, карта этапа, чат, настройки) поверх движка"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["idea-graph-core @ git+https://github.com/senia-glitch/idea-graph-core.git"]
+dependencies = [
+    "idea-graph-core @ git+https://github.com/senia-glitch/idea-graph-core.git",
+    "idea-graph-engine @ git+https://github.com/senia-glitch/idea-graph-composer.git",
+]
 
 [project.optional-dependencies]
 test = ["pytest"]

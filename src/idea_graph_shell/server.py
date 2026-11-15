@@ -1,5 +1,7 @@
 """Локальный веб-сервер оболочки: интерфейс для человека и мост для инструментов агента.
 
+Вся работа с агентами, этапами и банками — в ``idea-graph-engine``; здесь только HTTP и статические файлы.
+
 Слушает только 127.0.0.1. Запросы человека, которые что-то меняют, обязаны нести заголовок
 ``X-Idea-Graph`` (его не может поставить чужой сайт), запросы агента — ключ хода.
 """
@@ -14,13 +16,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from idea_graph_core import GraphError, Store, author_name, views
+from idea_graph_core import HUMAN, GraphError, Store, author_name, views
 
-from .agents import Adapters
-from .config import Settings
-from . import resources
-from .packages import Registry
-from .runtime import Project, ShellError
+from idea_graph_engine import Adapters, EngineError, Project, Registry, Settings, resources
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 4_000_000
@@ -43,7 +41,7 @@ class App:
     def open(self, folder: str) -> Project:
         path = Path(folder).expanduser()
         if not path.is_dir():
-            raise ShellError("no_folder", f"Папки нет: {path}")
+            raise EngineError("no_folder", f"Папки нет: {path}")
         with self.lock:
             project = Project(path, self.settings, self.registry, self.adapters)
             project.base_url = self.base_url
@@ -79,18 +77,18 @@ class App:
         name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", title).strip(" .")
         name = " ".join(name.split())
         if not name:
-            raise ShellError("invalid_input", "Введите название проекта")
+            raise EngineError("invalid_input", "Введите название проекта")
         base = Path(parent).expanduser() if parent.strip() else self.projects_root()
         path = base / name
         if Store.exists(path):
-            raise ShellError("already_exists", f"Проект «{name}» уже есть в папке {base}")
+            raise EngineError("already_exists", f"Проект «{name}» уже есть в папке {base}")
         path.mkdir(parents=True, exist_ok=True)
         Store.create(path, title)
         return self.open(str(path))
 
     def need(self) -> Project:
         if self.project is None:
-            raise ShellError("no_project", "Сначала откройте или создайте проект")
+            raise EngineError("no_project", "Сначала откройте или создайте проект")
         return self.project
 
     # ---------------------------------------------------------------- ответы на запросы
@@ -155,10 +153,16 @@ class App:
             return self.agents()
         if path == "/api/resources":
             return {"items": resources.load(self.need().dir)["items"]}
+        if path == "/api/stage":
+            return self.need().stage_status(query.get("package", [""])[0])
+        if path == "/api/bank":
+            bank = self.need().store.bank(query.get("name", [""])[0])
+            kind = query.get("type", [""])[0] or None
+            return {"records": bank.list(kind)}
         if path == "/api/card-history":
             project = self.need()
             return {"items": project.store.card_history(query.get("id", [""])[0])}
-        raise ShellError("not_found", "Нет такого адреса")
+        raise EngineError("not_found", "Нет такого адреса")
 
     def post(self, path: str, data: dict) -> dict:
         if path == "/api/project/open":
@@ -170,7 +174,7 @@ class App:
         if path == "/api/agents/check":
             adapter = self.adapters.get(str(data.get("agent") or ""))
             if adapter is None:
-                raise ShellError("invalid_input", "Нет такого агента")
+                raise EngineError("invalid_input", "Нет такого агента")
             version = adapter.version()
             return {"found": bool(adapter.found()), "version": version, "path": adapter.found()}
         project = self.need()
@@ -178,12 +182,34 @@ class App:
             try:
                 return {"item": resources.add(project.dir, str(data.get("value") or ""))}
             except resources.ResourceError as error:
-                raise ShellError("bad_resource", str(error)) from None
+                raise EngineError("bad_resource", str(error)) from None
         if path == "/api/resources/remove":
             try:
                 resources.remove(project.dir, str(data.get("id") or ""))
             except resources.ResourceError as error:
-                raise ShellError("bad_resource", str(error)) from None
+                raise EngineError("bad_resource", str(error)) from None
+            return {"ok": True}
+        if path in ("/api/stage/approve", "/api/stage/reopen", "/api/stage/clear-stale"):
+            package, step = str(data.get("package") or ""), str(data.get("step") or "")
+            if path.endswith("approve"):
+                return project.approve_step(package, step, bool(data.get("accept_all")))
+            return project.reopen_step(package, step) if path.endswith("reopen") else project.clear_stale(package, step)
+        if path == "/api/proposals/apply":
+            return project.apply_proposal(str(data.get("id") or ""))
+        if path == "/api/bank/save":                      # правка банка человеком (например, списка конкурентов)
+            bank = project.store.bank(str(data.get("name") or ""))
+            record = dict(data.get("data") or {})
+            record.setdefault("state", "accepted")
+            if data.get("id"):
+                saved = bank.update(str(data["id"]), HUMAN, data=record, sources=data.get("sources"))
+            else:
+                saved = bank.put(str(data.get("type") or ""), record, HUMAN, sources=data.get("sources"),
+                                 key=str(data.get("key") or ""))
+            project._touch()
+            return {"record": saved}
+        if path == "/api/bank/remove":
+            project.store.bank(str(data.get("name") or "")).remove(str(data.get("id") or ""))
+            project._touch()
             return {"ok": True}
         if path == "/api/ops":
             return project.human_ops(data.get("ops"), str(data.get("note") or ""))
@@ -195,25 +221,24 @@ class App:
         if path == "/api/run/start":
             auto = data.get("auto")
             return project.start(str(data.get("package") or ""), bool(data.get("fresh")),
-                                 auto=auto if isinstance(auto, dict) else None)
+                                 auto=auto if isinstance(auto, dict) else None,
+                                 step=str(data.get("step") or "") or None, action=str(data.get("action") or "") or None,
+                                 target=str(data.get("target") or "") or None)
         if path == "/api/run/stop":
             return project.stop(str(data.get("package") or ""))
-        if path == "/api/run/resume":
-            return project.resume(str(data.get("package") or ""))
+        if path == "/api/run/propose":
+            return project.propose_for_stale(str(data.get("package") or ""))
         if path == "/api/run/answer":
             return project.answer(str(data.get("package") or ""), str(data.get("question") or ""),
                                   data.get("choice") or {})
         if path == "/api/run/message":
             return project.message(str(data.get("package") or ""), str(data.get("text") or ""))
-        if path == "/api/run/answerer":
-            project.set_answerer(str(data.get("package") or ""), str(data.get("answerer") or ""))
-            return {"ok": True}
-        raise ShellError("not_found", "Нет такого адреса")
+        raise EngineError("not_found", "Нет такого адреса")
 
     def view_call(self, package_id: str, method: str, rest: str, data: dict) -> dict:
         manifest = self.registry.get(package_id)
         if manifest is None or not callable(manifest.get("api")):
-            raise ShellError("not_found", "У пакета нет своего экрана")
+            raise EngineError("not_found", "У пакета нет своего экрана")
         return manifest["api"](self, method, rest, data)
 
     def agent_call(self, token: str, path: str, data: dict) -> dict:
@@ -249,14 +274,14 @@ class Handler(BaseHTTPRequestHandler):
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
         if length > MAX_BODY:
-            raise ShellError("too_large", "Слишком большой запрос")
+            raise EngineError("too_large", "Слишком большой запрос")
         raw = self.rfile.read(length) if length else b"{}"
         try:
             data = json.loads(raw.decode("utf-8") or "{}")
         except ValueError:
-            raise ShellError("invalid_input", "Ожидался JSON") from None
+            raise EngineError("invalid_input", "Ожидался JSON") from None
         if not isinstance(data, dict):
-            raise ShellError("invalid_input", "Ожидался объект JSON")
+            raise EngineError("invalid_input", "Ожидался объект JSON")
         return data
 
     def _drain(self) -> None:
@@ -271,7 +296,7 @@ class Handler(BaseHTTPRequestHandler):
     def _run(self, work) -> None:
         try:
             self._json(work())
-        except (ShellError, GraphError) as error:
+        except (EngineError, GraphError) as error:
             self._json(error.as_dict(), 409 if getattr(error, "code", "") == "human_changed" else 400)
         except Exception as error:  # noqa: BLE001
             if callable(getattr(error, "as_dict", None)):      # ошибка пакета, понятная человеку

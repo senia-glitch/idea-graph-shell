@@ -6,7 +6,7 @@ import {graphIndex, loadGraph} from "./graph.js";
 const D = {autoOpen: false, resources: null, autoTarget: "", tab: "chat", filter: "all", history: null, historyRev: -1, draft: "", custom: {}, picked: {}};
 
 const STATUS_TEXT = {
-  idle: "ждёт", running: "думает…", asking: "ждёт вашего ответа", deciding: "решатель думает…",
+  idle: "ждёт", running: "думает…", asking: "ждёт вашего ответа", deciding: "совет решает…",
   finished: "закончил", error: "ошибка", stopped: "остановлен", paused: "на паузе", researching: "исследуют область…",
 };
 
@@ -66,7 +66,6 @@ export function initDock() {
       <button class="primary" title="Отправить">➤</button>
     </form>`;
   initDockResize();
-  $("pkgCtl").addEventListener("toggle", (e) => { if (e.target.matches("[data-auto-box]")) D.autoOpen = e.target.open; }, true);
   $("pkgBar").onclick = (e) => {
     const id = e.target.closest("[data-pkg]")?.dataset.pkg;
     if (id) { S.pkg = id; renderDock(); }
@@ -105,25 +104,10 @@ export function renderDock() {
   renderControls();
   const questions = openQuestions().length;
   const decided = decisionCards().filter((c) => c.decision.by !== "human").length;
-  setHtml($("dockTabs"), [["chat", "Чат" + (questions ? ` · ${questions} ?` : "")], ["decisions", "Решения агента" + (decided ? ` · ${decided}` : "")], ...(S.boot.packages.some((p) => p.research) ? [["resources", "Ресурсы" + (D.resources ? ` · ${D.resources.length}` : "")]] : []), ["history", "История"]]
+  setHtml($("dockTabs"), [["chat", "Чат" + (questions ? ` · ${questions} ?` : "")], ["decisions", "Решения совета" + (decided ? ` · ${decided}` : "")], ...(S.boot.packages.some((p) => p.research) ? [["resources", "Ресурсы" + (D.resources ? ` · ${D.resources.length}` : "")]] : []), ["history", "История"]]
     .map(([id, name]) => `<button data-tab="${id}" class="${D.tab === id ? "on" : ""}">${name}</button>`).join(""));
   $("chatForm").hidden = D.tab !== "chat";
   renderBody();
-}
-
-function autoRow(pkg, busy) {
-  const targets = [...graphIndex().cards.values()].filter((c) => c.kind === pkg.auto.targets);
-  if (D.autoTarget && !targets.some((c) => c.id === D.autoTarget)) D.autoTarget = "";
-  const options = [`<option value="">все (${targets.length})</option>`,
-    ...targets.map((c) => `<option value="${c.id}"${D.autoTarget === c.id ? " selected" : ""}>${esc(c.title.slice(0, 60))}</option>`)].join("");
-  return `<details class="auto-box" data-auto-box${D.autoOpen || !targets.length ? " open" : ""}>
-    <summary title="Агент без вопросов достроит ветку до результата в пределах лимитов из настроек. Карточки останутся предложенными: примите и поправьте их на графе">Автоматический режим</summary>
-    <select data-auto-target ${targets.length ? "" : "disabled"} title="Для какой карточки «${esc(pkg.auto.targets)}» запустить">${options}</select>
-    <div class="auto-actions">
-      <button data-do="auto" ${targets.length && !busy ? "" : "disabled"} title="Исследование области (если включено в настройках), затем ветка до результатов">⚡ Авто</button>
-      ${pkg.research ? `<button data-do="research" ${targets.length && !busy ? "" : "disabled"} title="Три исследователя на разных моделях найдут реальные сценарии и проблемы области; агент создаст из них карточки со ссылками на источники">🔎 Исследовать</button>` : ""}</div>
-    ${targets.length ? "" : `<div class="hint">Нужна хотя бы одна карточка «${esc(pkg.auto.targets)}»: нажмите «+ Домен» вверху.</div>`}
-  </details>`;
 }
 
 function renderControls() {
@@ -131,7 +115,6 @@ function renderControls() {
   if (!pkg) { setHtml(box, ""); return; }
   const run = runOf(pkg.id), status = run?.status || "idle";
   const busy = status === "running" || status === "deciding" || status === "researching";
-  const answerer = S.project.answerers[pkg.id] || "human";
   const started = run && run.turn > 0;
   setHtml(box, `
     <div class="ctl-row">
@@ -140,25 +123,16 @@ function renderControls() {
       ${run?.turn ? `<span class="hint">ходов: ${run.turn}${run.cost ? ` · $${run.cost.toFixed(3)}` : ""}</span>` : ""}
       <span class="spacer"></span>
       ${busy ? '<button data-do="stop">■ Стоп</button>'
-        : `<button class="primary" data-do="${status === "paused" ? "resume" : "start"}">${status === "paused" ? "Продолжить" : started && pkg.kind === "agent" && status !== "finished" ? "▶ Продолжить" : "▶ Запустить"}</button>`}
+        : `<button class="primary" data-do="start">${started && pkg.kind === "agent" && status !== "finished" ? "▶ Продолжить" : "▶ Запустить"}</button>`}
       ${started && !busy && pkg.kind === "agent" ? '<button data-do="fresh" title="Начать с новой сессией агента: он получит весь граф заново">Заново</button>' : ""}
     </div>
-    ${pkg.auto ? autoRow(pkg, busy) : ""}
-    ${pkg.asks && S.boot.packages.some((p) => p.kind === "decider") ? `<div class="ctl-row"><span class="hint">На вопросы отвечает:</span>
-      <div class="seg"><button data-who="human" class="${answerer === "human" ? "on" : ""}">Я</button><button data-who="decider" class="${answerer === "decider" ? "on" : ""}" title="Пакет-решатель: его решения помечаются и их можно переопределить">Решатель</button></div></div>` : ""}
     ${run?.error ? `<div class="err">${esc(run.error)}</div>` : ""}
-    ${status === "paused" && run.pause_reason ? `<div class="warn-box">${esc(run.pause_reason)}</div>` : ""}
     ${status === "finished" && run.outcome ? `<div class="hint">Итог: <b>${esc(run.outcome)}</b></div>` : ""}`);
-  box.onchange = (e) => { if (e.target.dataset.autoTarget !== undefined) D.autoTarget = e.target.value; };
   box.onclick = (e) => {
-    const todo = e.target.dataset.do, who = e.target.dataset.who;
+    const todo = e.target.dataset.do;
     if (todo === "start") act(async () => { await api("/api/run/start", {package: pkg.id}); emit("poll"); });
-    if (todo === "auto") act(async () => { await api("/api/run/start", {package: pkg.id, auto: {targets: D.autoTarget ? [D.autoTarget] : []}}); emit("poll"); });
-    if (todo === "research") act(async () => { await api("/api/run/start", {package: pkg.id, auto: {targets: D.autoTarget ? [D.autoTarget] : [], only_research: true}}); emit("poll"); });
     if (todo === "fresh") act(async () => { await api("/api/run/start", {package: pkg.id, fresh: true}); emit("poll"); });
     if (todo === "stop") act(async () => { await api("/api/run/stop", {package: pkg.id}); emit("poll"); });
-    if (todo === "resume") act(async () => { await api("/api/run/resume", {package: pkg.id}); emit("poll"); });
-    if (who) act(async () => { await api("/api/run/answerer", {package: pkg.id, answerer: who}); emit("poll"); });
   };
 }
 
@@ -167,8 +141,7 @@ function renderControls() {
 function openQuestions() {
   const out = [];
   for (const run of Object.values(S.project?.runs || {})) {
-    if (run.question && (run.status === "asking" || run.status === "paused")) out.push({...run.question, deferred: false});
-    for (const q of run.deferred || []) out.push({...q, deferred: true});
+    if (run.question && run.status === "asking") out.push({...run.question, deferred: false});
   }
   return out.sort((a, b) => (a.package === S.pkg ? -1 : 0) - (b.package === S.pkg ? -1 : 0));
 }
@@ -184,8 +157,7 @@ function questionHtml(q) {
   const index = graphIndex();
   return `<div class="question" data-qbox="${q.id}">
     <div class="qhead"><span class="chip">${esc(packageName(q.package))}</span>
-      ${q.deferred ? '<span class="chip warn" title="Вопрос затрагивает ваше решение, поэтому решатель его не трогает">ждёт вас</span>' : ""}
-      ${q.important ? '<span class="chip" title="Затрагивает корень, несколько веток или карточку, от которой многое зависит">важный</span>' : ""}</div>
+</div>
     ${q.comment ? `<div class="qcomment">${esc(q.comment)}</div>` : ""}
     <div class="qtext">${esc(q.question)}</div>
     ${cards.length ? `<div class="qcards">${cards.filter((id) => index.cards.has(id)).map((id) => `<a href="#" data-card="${id}">${esc(index.cards.get(id).title)}</a>`).join("")}</div>` : ""}
@@ -236,7 +208,7 @@ function bindQuestions(body) {
 // ---------------------------------------------------------------------- тело панели
 
 function chatLine(m) {
-  const who = m.who === "human" ? "Вы" : m.who === "agent" ? packageName(m.package) : m.who === "decider" ? "Решатель" : "Оболочка";
+  const who = m.who === "human" ? "Вы" : m.who === "agent" ? packageName(m.package) : m.who === "council" ? "Совет" : "Система";
   let text = esc(m.text);
   if (m.kind === "answer") {
     text = `<span class="hint">на вопрос «${esc(m.question)}»</span><br>${text}` +
@@ -276,8 +248,8 @@ function renderChat(body) {
   body.dataset.tab = "chat";
   body.dataset.qs = JSON.stringify(questions.map((q) => q.id));
   body.innerHTML =
-    (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).map(chatLine).join("") : '<div class="empty">Нажмите «+ Домен» вверху и напишите, кто испытывает проблему. Затем «▶ Запустить»: агент будет задавать вопросы с готовыми вариантами ответа, а ваши ответы превращать в карточки: домен → сценарий → проблема → результат.</div>') +
-    busy.map((r) => `<div class="thinking">${esc(packageName(r.package))}: ${r.status === "deciding" ? "решатель думает" : r.status === "researching" ? "исследователи ищут информацию" : "агент думает"}<span class="dots"></span></div>`).join("") +
+    (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).map(chatLine).join("") : '<div class="empty">Напишите сферу бизнеса («+ Сфера» вверху) и откройте «Карту этапа»: у каждого шага есть помощник — предложить, проверить, уточнить. Вопросы агента появятся здесь, с готовыми вариантами ответа.</div>') +
+    busy.map((r) => `<div class="thinking">${esc(packageName(r.package))}: ${r.status === "deciding" ? "совет решает" : r.status === "researching" ? "исследователи ищут информацию" : "агент думает"}<span class="dots"></span></div>`).join("") +
     questions.map(questionHtml).join("");
   bindQuestions(body);
   if (stick) body.scrollTop = body.scrollHeight;

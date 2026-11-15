@@ -246,3 +246,82 @@ details summary:hover{color:var(--txt)}
 @media (max-width:1100px){.dock{width:340px}.inspector{width:270px}header{gap:6px}.project-title{max-width:22vw}}
 @media (max-width:760px){.form-grid{grid-template-columns:1fr}.page{padding:18px 16px 60px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ============ карта этапа ============ */
+#tab-map{flex-direction:row}
+.map-page{flex:1;min-width:0;overflow:auto;padding:22px 26px 80px}
+.map-top{display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-bottom:10px}
+.map-title h2{margin:0 0 2px;font-size:20px}
+.pkgtabs{display:inline-flex;gap:6px}
+.pkgtabs button.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink);font-weight:700}
+.auto-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 14px;margin:8px 0;background:var(--panel3);border:1px solid var(--line-soft);border-radius:var(--r-lg)}
+.auto-bar select{width:auto;min-width:140px}
+.runline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 4px;padding:7px 14px;border-radius:var(--r);background:var(--panel3);border:1px solid var(--line-soft)}
+.err-inline{color:#ffb8b8}
+.steps{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px 4px;margin:14px 0 8px}
+.step-arrow{align-self:center;color:#e0504f;font-size:22px;font-weight:700;padding:0 2px}
+.step{width:236px;display:flex;flex-direction:column;gap:7px;padding:12px;border-radius:var(--r-lg);background:#2a3a2d;border:1px solid #3f6a47;cursor:pointer;transition:border-color .12s,transform .12s}
+.step:hover{border-color:#6bb27a}
+.step.sel{outline:2px solid var(--acc);outline-offset:1px}
+.step.approved{background:#2c4632;border-color:#58a468}
+.step.stale{border-color:#c9a227;background:#3a3826}
+.step-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.step-n{width:22px;height:22px;border-radius:50%;background:#58a468;color:#10200f;font-weight:800;font-size:12px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.step-badge{margin-left:auto;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:1px 7px;border-radius:999px;background:#3d3e45;color:#d0d0d7}
+.step-badge.approved{background:#58a468;color:#10200f}
+.step-badge.warn{background:#c9a227;color:#221b04}
+.step-q{font-size:13px;line-height:1.4;color:#dfe6df}
+.step-meta{font-size:12px;color:var(--dim);min-height:18px}
+.step-stale{font-size:12px;color:#f0d58d;border-top:1px dashed #7a6a30;padding-top:6px}
+.step-stale .row-actions{margin-top:6px;justify-content:flex-start}
+.step-target select{padding:4px 8px;font-size:12px}
+.step-actions{display:flex;gap:5px;flex-wrap:wrap}
+.step-actions button{padding:4px 9px;font-size:12px}
+.step-gate{margin-top:auto}
+.step-gate button{width:100%}
+.step-detail{margin-top:18px;padding:16px 18px;background:var(--panel);border:1px solid var(--line-soft);border-radius:var(--r-lg)}
+.step-detail h3,.map-page>h3{margin:0 0 4px;font-size:16px}
+.map-page>h3{margin-top:22px}
+table.bank{width:100%;border-collapse:collapse;margin:4px 0 8px}
+table.bank th{text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--faint);padding:5px 6px}
+table.bank td{padding:4px 6px;border-top:1px solid var(--line-soft);vertical-align:middle}
+table.bank td input,table.bank td select{padding:4px 7px;font-size:13px}
+table.bank tr.proposed td{background:rgba(232,163,90,.06)}
+.bank-act{white-space:nowrap;text-align:right}
+.bank-act button{padding:2px 8px;margin-left:4px}
+.bank-add{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.bank-add input,.bank-add select{width:auto;flex:1 1 130px}
+.produced{display:flex;flex-direction:column;gap:5px}
+.prow{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:var(--r);background:var(--panel3);border:1px solid var(--line-soft)}
+.prow .rtext{flex:1;min-width:0}
+.prow.remark{align-items:flex-start}
+.prow button{padding:2px 9px}
+.visual-box{overflow:auto;padding:6px 0}
+.uc-wrap{overflow:auto}
+svg.uc text{fill:var(--txt);font-size:12px}
+svg.uc .uc-link{stroke:#80818b;stroke-width:1.4}
+svg.uc .uc-actor circle,svg.uc .uc-actor path{fill:none;stroke:#5aa0ff;stroke-width:1.6;stroke-linecap:round}
+svg.uc .uc-case ellipse{fill:#2d2e33;stroke:#bb9af7;stroke-width:1.5}
+svg.uc .uc-case.chosen ellipse{fill:#33403a;stroke:#7fc97f}
+
+/* ============ карточки видов этапа и диаграммы ============ */
+.chips-line{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:0 10px 6px}
+.chip.role{background:#27384f;color:#a9c8ff;text-transform:none;letter-spacing:0}
+.seq-note{font-size:12px;color:#c8c8d0;line-height:1.5}
+.seq-pain-count{color:#ff8f8f}
+svg.seq{max-width:100%;height:auto;color:var(--txt)}
+svg.seq .seq-actor{fill:#2d2e33;stroke:#5aa0ff;stroke-width:1.4}
+svg.seq .seq-name{fill:var(--txt);font-size:12px;font-weight:700}
+svg.seq .seq-life{stroke:#4a4b53;stroke-width:1;stroke-dasharray:4 4}
+svg.seq .seq-text{font-size:11px}
+svg.seq .seq-pain-mark{fill:#fff;font-size:11px;font-weight:800}
+.seq-view{overflow:auto;border:1px solid var(--line-soft);border-radius:var(--r);padding:6px;background:#1a1b1e;margin-bottom:8px}
+.seq-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line-soft)}
+.seq-row>b{width:20px;text-align:right;color:var(--dim)}
+.seq-row select{width:auto;max-width:110px;padding:3px 6px;font-size:12px}
+.seq-row input[data-f=text]{flex:1 1 140px;padding:3px 7px;font-size:12px}
+.seq-row .icon{padding:0 6px}
+.seq-pain-edit{flex:1 1 100%;margin-left:25px}
+.seq-pain-edit input,.seq-pain-edit select{margin:3px 4px 0 0;width:auto;font-size:12px;padding:3px 6px}
+.dock .map-hint{padding:6px 14px}
+@media (max-width:900px){.step{width:100%}.step-arrow{display:none}}

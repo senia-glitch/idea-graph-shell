@@ -16,6 +16,36 @@ export const $ = (id) => document.getElementById(id);
 export const DETAIL = "детализирует";
 export const STATUS = {proposed: "предложена", accepted: "принята"};
 
+/* Что этапы объявили про карточки: виды, поля, скрытые связи, модули отрисовки. */
+export const stagePackages = () => (S.boot?.packages || []).filter((p) => p.stage);
+export const stageKinds = () => stagePackages().flatMap((p) => p.stage.kinds || []);
+export const kindDecl = (kind) => stageKinds().find((k) => k.kind === kind);
+export const hiddenEdgeKinds = () => new Set(stagePackages().flatMap((p) => p.stage.hidden_edges || []));
+export const rootKind = () => stagePackages().map((p) => p.stage.roots).find(Boolean) || "сфера";
+
+const modules = new Map();
+/* Подгрузить JS-модуль пакета (например, отрисовку диаграмм): /pkg/<пакет>/static/<файл>. */
+export async function loadModule(pkg, file) {
+  const key = pkg + "/" + file;
+  if (!modules.has(key)) {
+    modules.set(key, import(`/pkg/${pkg}/static/${file}`).catch((error) => { console.error(error); return null; }));
+  }
+  return modules.get(key);
+}
+const loaded = new Map();
+export async function preloadModules() {
+  for (const p of stagePackages()) {
+    for (const k of p.stage.kinds || []) {
+      if (k.renderer) loaded.set("kind:" + k.kind, {...k.renderer, module: await loadModule(p.id, k.renderer.module)});
+    }
+    for (const s of p.stage.steps || []) {
+      if (s.visual) loaded.set("step:" + p.id + ":" + s.id, {...s.visual, module: await loadModule(p.id, s.visual.module)});
+    }
+  }
+}
+export const kindRenderer = (kind) => loaded.get("kind:" + kind);
+export const stepVisual = (pkg, step) => loaded.get("step:" + pkg + ":" + step);
+
 const bus = new EventTarget();
 export const on = (name, fn) => bus.addEventListener(name, (event) => fn(event.detail));
 export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, {detail}));
@@ -89,7 +119,7 @@ export function when(ts) {
 export function authorName(author) {
   if (author === "human") return "человек";
   if (author?.startsWith("package:")) return "пакет " + packageName(author.slice(8));
-  if (author?.startsWith("decider")) return "решатель";
+  if (author === "council" || author?.startsWith("council")) return "совет";
   return author || "";
 }
 

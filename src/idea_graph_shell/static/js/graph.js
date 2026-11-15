@@ -1,7 +1,7 @@
 /* Экран «Граф»: карточки на холсте и панель свойств выбранной карточки или связи. */
 
 import {createCanvas} from "./canvas.js";
-import {$, DETAIL, S, STATUS, act, api, authorName, emit, esc, on, promptText, toast, when} from "./core.js";
+import {$, DETAIL, S, STATUS, act, api, authorName, emit, esc, hiddenEdgeKinds, kindDecl, kindRenderer, on, promptText, rootKind, stageKinds, toast, when} from "./core.js";
 
 let canvas;
 let layoutLoaded = false;
@@ -9,19 +9,19 @@ let saveTimer = 0;
 const G = {cards: new Map(), edges: [], parents: new Map(), children: new Map()};
 
 const KIND_COLORS = {
-  "домен": "#e8833a", "сценарий": "#5aa0ff", "проблема": "#ff8fa3", "результат": "#7fc97f",
   "ветка": "#5aa0ff", "решение": "#7fc97f", "граница": "#ff5d5d",
-  "открытый вопрос": "#e8c33a", "замечание": "#ff8fa3", "требование": "#bb9af7", "факт": "#6fd3c7",
-  "конкурент": "#c9a86a",
+  "открытый вопрос": "#e8c33a", "замечание": "#e8c33a", "правка": "#e79fd5",
 };
 const PALETTE = ["#5aa0ff", "#7fc97f", "#bb9af7", "#c9a86a", "#6fd3c7", "#e79fd5", "#9fb4ff"];
 function kindColor(kind) {
+  const declared = kindDecl(kind)?.color;
+  if (declared) return declared;
   if (KIND_COLORS[kind]) return KIND_COLORS[kind];
   let h = 0;
   for (const ch of kind) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return PALETTE[h % PALETTE.length];
 }
-const SERVICE_KINDS = ["открытый вопрос", "замечание"];   // их не «принимают»: на вопрос отвечают, замечание исправляют
+const SERVICE_KINDS = ["открытый вопрос", "замечание", "правка"];   // их не «принимают»: замечание учитывают, правку применяют
 const EDGE_COLORS = {"противоречит": "#ff5d5d", "о карточке": "#ff8fa3", "подтверждает": "#7fc97f", "опровергает": "#ff5d5d"};
 
 export function graphIndex() { return G; }
@@ -38,15 +38,17 @@ function decisionBadges(card) {
   const d = card.decision;
   if (!d || typeof d !== "object") return "";
   const bits = [];
-  if (d.by && d.by !== "human") bits.push('<span class="chip agent" title="Решение принял решатель — его можно переопределить">решил агент</span>');
+  if (d.by === "council") bits.push('<span class="chip agent" title="Решение принял совет из трёх агентов — его можно переопределить">решил совет</span>');
+  else if (d.by && d.by !== "human") bits.push('<span class="chip agent" title="Решение принял агент — его можно переопределить">решил агент</span>');
   if (d.by === "human") bits.push('<span class="chip">решили вы</span>');
   if (d.assumption) bits.push('<span class="chip warn" title="Для уверенного решения не хватило фактов">допущение</span>');
-  if (d.disputed) bits.push('<span class="chip warn" title="Два решателя сначала разошлись">после спора</span>');
+  if (d.disputed) bits.push('<span class="chip warn" title="Советники сначала разошлись, потом обсудили">после спора</span>');
   return bits.length ? `<div class="badges">${bits.join("")}</div>` : "";
 }
 
 function cardFields(card) {
-  return S.boot.packages.flatMap((p) => p.card_fields || []).filter((f) => f.kind === card.kind);
+  const seen = new Set();
+  return stageKinds().filter((k) => k.kind === card.kind).flatMap((k) => k.fields || []).filter((f) => !seen.has(f.name) && seen.add(f.name));
 }
 
 function fieldRegex(name) {
@@ -68,6 +70,34 @@ function setFieldValue(card, field, value) {
   return lines.join("\n");
 }
 
+/* Тело карточки: у видов с рендерером — его краткий вид, у «правки» — что и на что меняется, иначе текст. */
+function nodeBody(card) {
+  const renderer = kindRenderer(card.kind);
+  if (renderer?.module?.node) return `<div class="body">${renderer.module.node(card, {esc})}</div>` + (card.body ? `<div class="body">${esc(card.body)}</div>` : "");
+  if (card.kind === "правка") {
+    const a = card.attrs || {};
+    return `<div class="body">${esc(a.reason || "")}<br><span class="hint">${esc(a.field === "body" ? "текст" : "заголовок")} → </span><b>${esc(String(a.new || "").slice(0, 160))}</b></div>`;
+  }
+  return card.body ? `<div class="body">${esc(card.body)}</div>` : "";
+}
+
+/* Список связанных карточек внутри карточки (например, «Роли» сценария): граф не обрастает линиями. */
+function chipsLine(card) {
+  const spec = kindDecl(card.kind)?.chips;
+  if (!spec) return "";
+  const names = G.edges.filter((e) => e.kind === spec.edge && e.from === card.id).map((e) => G.cards.get(e.to)?.title).filter(Boolean);
+  return `<div class="chips-line"><span class="hint">${esc(spec.label)}:</span> ${names.length ? names.map((n) => `<span class="chip role">${esc(n)}</span>`).join("") : '<span class="hint">не указаны</span>'}</div>`;
+}
+
+function nodeActions(card) {
+  if (card.kind === "правка") {
+    return '<div class="row-actions"><button data-act="apply" title="Применить правку к карточке и убрать её">✓ Применить</button><button data-act="delete" class="danger" title="Отклонить правку">✕ Отклонить</button></div>';
+  }
+  if (card.status !== "proposed") return "";
+  return '<div class="row-actions">' + (SERVICE_KINDS.includes(card.kind) ? "" : '<button data-act="accept" title="Принять карточку">✓ Принять</button>') +
+    '<button data-act="delete" class="danger" title="Удалить карточку">✕ Удалить</button></div>';
+}
+
 function renderNode(card) {
   const agent = card.author !== "human";
   return `<div class="hd" style="--c:${kindColor(card.kind)}"><span class="grip" title="Перетащить карточку вместе с её веткой">⠿</span>` +
@@ -76,19 +106,17 @@ function renderNode(card) {
     (card.status === "proposed" ? '<span class="chip todo">предложена</span>' : "") +
     `<span class="t" title="${esc(card.title)}">${esc(card.title)}</span>` +
     '<span class="link-handle" title="Потяните к другой карточке, чтобы связать">○</span></div>' +
-    (card.body ? `<div class="body">${esc(card.body)}</div>` : "") +
+    nodeBody(card) +
+    chipsLine(card) +
     decisionBadges(card) +
-    (card.status === "proposed"
-      ? '<div class="row-actions">' + (SERVICE_KINDS.includes(card.kind) ? "" : '<button data-act="accept" title="Принять карточку">✓ Принять</button>') +
-        '<button data-act="delete" class="danger" title="Удалить карточку">✕ Удалить</button></div>'
-      : "") +
+    nodeActions(card) +
     '<button type="button" class="add-child" data-act="child" title="Добавить потомка">+</button>';
 }
 
 function renderPending() {
   return '<div class="hd"><span class="chip">новая карточка</span><span class="t"></span><button type="button" class="pending-close" data-close title="Отменить (Esc)">×</button></div>' +
-    '<form class="pending-form"><label>Вид<input name="kind" list="kindList" value="решение" maxlength="60" required></label>' +
-    `<datalist id="kindList">${["ветка", "решение", "граница", "открытый вопрос", ...kinds()].filter((v, i, a) => a.indexOf(v) === i).map((k) => `<option value="${esc(k)}">`).join("")}</datalist>` +
+    '<form class="pending-form"><label>Вид<input name="kind" list="kindList" value="' + esc(stageKinds().map((k) => k.kind).find((k) => k !== rootKind()) || "решение") + '" maxlength="60" required></label>' +
+    `<datalist id="kindList">${[...stageKinds().map((k) => k.kind), "ветка", "решение", "граница", "открытый вопрос", ...kinds()].filter((v, i, a) => a.indexOf(v) === i).map((k) => `<option value="${esc(k)}">`).join("")}</datalist>` +
     '<label>Заголовок<input name="title" required maxlength="200" placeholder="Например: Оплата только по СБП"></label>' +
     '<label>Текст<textarea name="body" rows="3" placeholder="Подробности — по желанию"></textarea></label>' +
     '<div class="row-actions"><button type="button" data-close>Отмена</button><button class="primary">Добавить</button></div></form>';
@@ -104,6 +132,7 @@ async function onAction(action, id) {
   if (action === "child") return canvas.startPending(id);
   if (action === "accept") return act(() => ops([{op: "update_card", id, status: "accepted"}]));
   if (action === "delete") return removeCard(id);
+  if (action === "apply") return act(async () => { await api("/api/proposals/apply", {id}); await loadGraph(); toast("Правка применена"); });
 }
 
 async function removeCard(id) {
@@ -147,11 +176,11 @@ export function initGraph() {
     }),
   });
   $("fitBtn").onclick = () => canvas.fit();
-  $("addDomainBtn").onclick = () => act(async () => {
-    const title = await promptText("Кто испытывает проблему? Назовите конкретную группу людей (домен)", "");
+  $("addRootBtn").onclick = () => act(async () => {
+    const kind = rootKind();
+    const title = await promptText("Напишите сферу бизнеса, подлежащую автоматизации", "");
     if (!title) return;
-    const result = await api("/api/ops", {ops: [{op: "add_card", kind: "домен", title: title.slice(0, 200),
-      body: title.length > 200 ? title : ""}]});
+    const result = await api("/api/ops", {ops: [{op: "add_card", kind, title: title.slice(0, 200), body: title.length > 200 ? title : ""}]});
     await loadGraph();
     canvas.select(result.ids[0]);
     renderInspector();
@@ -189,7 +218,8 @@ export async function loadGraph() {
   if (fresh.length) setTimeout(() => { canvas.markFresh([]); canvas.draw(); }, 4000);
   // по порядку появления: так новые карточки встают рядом с родителем
   const order = [...data.cards].sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
-  canvas.setData(order, data.edges);
+  const hidden = hiddenEdgeKinds();
+  canvas.setData(order, data.edges.filter((e) => !hidden.has(e.kind)));
   renderInspector();
   emit("graph");
 }
@@ -249,6 +279,7 @@ function renderInspector() {
     <label>Текст<textarea id="fBody" rows="7">${esc(card.body || "")}</textarea></label>
     ${cardFields(card).map((f, i) => `<label>${esc(f.name)}<select data-field="${i}"><option value="">не выбрана</option>${f.values.map((v) =>
       `<option value="${esc(v)}"${fieldValue(card, f) === v ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("")}
+    <div id="rendererBox"></div>
     <div class="seg" id="fStatus">${Object.entries(STATUS).map(([key, name]) =>
       `<button class="${card.status === key ? "on" : ""}" data-status="${key}">${name}</button>`).join("")}</div>
     <div class="hint">Автор: ${esc(authorName(card.author))} · зависит карточек: ${dependents(card.id).size}</div>
@@ -263,6 +294,11 @@ function renderInspector() {
     if (value !== (card[field] || "")) act(() => ops([{op: "update_card", id: card.id, [field]: value}]));
   });
   save("kind", "fKind"); save("title", "fTitle"); save("body", "fBody");
+  const renderer = kindRenderer(card.kind);
+  if (renderer?.module?.editor) {
+    renderer.module.editor($("rendererBox"), card, {esc, tobe: !!renderer.tobe,
+      save: (diagram) => act(() => ops([{op: "update_card", id: card.id, attrs: {diagram}}], "правка диаграммы"))});
+  }
   box.querySelectorAll("select[data-field]").forEach((select) => {
     select.onchange = () => {
       const field = cardFields(card)[Number(select.dataset.field)];

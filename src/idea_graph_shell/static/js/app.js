@@ -1,9 +1,10 @@
 /* Запуск интерфейса: вкладки, выбор проекта, опрос состояния оболочки. */
 
 import {createCanvas} from "./canvas.js";
-import {$, S, act, api, emit, esc, on, toast} from "./core.js";
+import {$, S, act, api, emit, esc, on, preloadModules, stagePackages, toast} from "./core.js";
 import {initDock, renderDock} from "./dock.js";
 import {initGraph, loadGraph, resetGraphView} from "./graph.js";
+import {initMap, renderMap} from "./map.js";
 import {renderSettings} from "./settings.js";
 
 let tab = "welcome";
@@ -12,7 +13,7 @@ const mounted = new Map();
 
 function tabs() {
   const items = S.project
-    ? [["graph", "Граф"], ...S.boot.views.map((v) => ["view-" + v.id, v.tab]), ["settings", "Настройки"]]
+    ? [...(stagePackages().length ? [["map", "Карта этапа"]] : []), ["graph", "Граф"], ...S.boot.views.map((v) => ["view-" + v.id, v.tab]), ["settings", "Настройки"]]
     : [["welcome", "Проекты"], ["settings", "Настройки"]];
   $("tabs").innerHTML = items.map(([id, name]) => `<button class="tabbtn${tab === id ? " on" : ""}" data-tab="${id}">${esc(name)}</button>`).join("");
 }
@@ -20,11 +21,15 @@ function tabs() {
 async function show(next) {
   tab = next;
   document.querySelectorAll("main > .tab").forEach((el) => el.classList.toggle("on", el.id === "tab-" + next));
-  for (const id of ["zoomLabel", "fitBtn", "undoBtn", "addDomainBtn"]) $(id).style.display = next === "graph" ? "" : "none";
+  // правая панель (чат и вопросы агента) общая для графа и карты этапа
+  if (next === "graph" || next === "map") document.getElementById("tab-" + next).appendChild($("dock"));
+  for (const id of ["zoomLabel", "fitBtn"]) $(id).style.display = next === "graph" ? "" : "none";
+  for (const id of ["undoBtn", "addRootBtn"]) $(id).style.display = next === "graph" || next === "map" ? "" : "none";
   tabs();
   if (next === "settings") renderSettings();
   if (next === "welcome") renderWelcome();
   if (next === "graph") emit("state");
+  if (next === "map") renderMap();
   if (next.startsWith("view-")) await mountView(next.slice(5));
 }
 
@@ -99,7 +104,8 @@ async function openProject() {
   if (!S.project) { tabs(); return show("welcome"); }
   $("projectTitle").textContent = S.project.title;
   document.title = S.project.title + " — Граф идеи";
-  await show("graph");
+  await preloadModules();
+  await show(stagePackages().length ? "map" : "graph");
   await loadGraph();
   graphRevision = S.project.revision;
   renderDock();
@@ -118,6 +124,7 @@ async function poll() {
     $("saveState").textContent = "";
     if (state.revision !== graphRevision) { graphRevision = state.revision; await loadGraph(); }
     emit("state");
+    if (tab === "map") renderMap();
   } catch (error) {
     $("saveState").textContent = "нет связи с оболочкой";
   } finally {
@@ -130,6 +137,8 @@ async function main() {
   $("openBtn").onclick = () => show(tab === "welcome" && S.project ? "graph" : "welcome");
   initGraph();
   initDock();
+  initMap();
+  on("goto-graph", async (id) => { await show("graph"); emit("reveal", id); });
   on("poll", poll);
   try {
     await openProject();
