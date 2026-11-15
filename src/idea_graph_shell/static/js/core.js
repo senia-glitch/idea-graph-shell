@@ -4,47 +4,14 @@ export {esc} from "./canvas.js";
 import {esc} from "./canvas.js";
 
 export const S = {
-  boot: null,          // пакеты, настройки, экраны пакетов
-  project: null,       // состояние открытой идеи: ревизия, работа пакетов
+  boot: null,          // шаги, настройки, проекты
+  project: null,       // состояние проекта: версия, текущая работа агентов
   graph: null,         // карточки и связи
-  chat: [],
-  chatSeq: 0,
-  phase: "",           // крупный этап в фокусе
+  bank: [],            // записи банка знаний
+  step: 0,             // шаг цепочки, открытый слева
 };
 
 export const $ = (id) => document.getElementById(id);
-export const DETAIL = "детализирует";
-export const STATUS = {proposed: "предложена", accepted: "принята"};
-
-/* Что этапы объявили про карточки: виды, поля, скрытые связи, модули отрисовки. */
-export const stagePackages = () => (S.boot?.packages || []).filter((p) => p.stage);
-export const stageKinds = () => stagePackages().flatMap((p) => p.stage.kinds || []);
-export const kindDecl = (kind) => stageKinds().find((k) => k.kind === kind);
-export const hiddenEdgeKinds = () => new Set(stagePackages().flatMap((p) => p.stage.hidden_edges || []));
-export const rootKind = () => stagePackages().map((p) => p.stage.roots).find(Boolean) || "сфера";
-
-const modules = new Map();
-/* Подгрузить JS-модуль пакета (например, отрисовку диаграмм): /pkg/<пакет>/static/<файл>. */
-export async function loadModule(pkg, file) {
-  const key = pkg + "/" + file;
-  if (!modules.has(key)) {
-    modules.set(key, import(`/pkg/${pkg}/static/${file}`).catch((error) => { console.error(error); return null; }));
-  }
-  return modules.get(key);
-}
-const loaded = new Map();
-export async function preloadModules() {
-  for (const p of stagePackages()) {
-    for (const k of p.stage.kinds || []) {
-      if (k.renderer) loaded.set("kind:" + k.kind, {...k.renderer, module: await loadModule(p.id, k.renderer.module)});
-    }
-    for (const s of p.stage.steps || []) {
-      if (s.visual) loaded.set("step:" + p.id + ":" + s.id, {...s.visual, module: await loadModule(p.id, s.visual.module)});
-    }
-  }
-}
-export const kindRenderer = (kind) => loaded.get("kind:" + kind);
-export const stepVisual = (pkg, step) => loaded.get("step:" + pkg + ":" + step);
 
 const bus = new EventTarget();
 export const on = (name, fn) => bus.addEventListener(name, (event) => fn(event.detail));
@@ -70,13 +37,12 @@ export async function api(path, data) {
 }
 
 let toastTimer = 0;
-export function toast(text, action) {
+export function toast(text) {
   const el = $("toast");
-  el.innerHTML = esc(text) + (action ? ` <button id="toastAct">${esc(action.label)}</button>` : "");
+  el.textContent = text;
   el.hidden = false;
-  if (action) $("toastAct").onclick = () => { el.hidden = true; action.run(); };
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, action ? 7000 : 3500);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 4500);
 }
 
 /* Действие с показом ошибки: всё, что нажимает человек, идёт через эту обёртку. */
@@ -89,51 +55,18 @@ export async function act(fn) {
   }
 }
 
-/* Маленькое окно ввода одной строки (вид связи и т. п.). */
-export function promptText(title, value, suggestions = []) {
-  return new Promise((resolve) => {
-    const back = document.createElement("div");
-    back.className = "modal-back";
-    back.innerHTML = `<form class="modal"><div class="modal-title">${esc(title)}</div>
-      <input name="v" value="${esc(value)}" list="promptList" autocomplete="off">
-      <datalist id="promptList">${suggestions.map((s) => `<option value="${esc(s)}">`).join("")}</datalist>
-      <div class="modal-actions"><button type="button" data-no>Отмена</button><button class="primary">Готово</button></div></form>`;
-    const done = (result) => { back.remove(); resolve(result); };
-    back.querySelector("form").onsubmit = (e) => { e.preventDefault(); done(back.querySelector("input").value.trim() || null); };
-    back.querySelector("[data-no]").onclick = () => done(null);
-    back.addEventListener("mousedown", (e) => { if (e.target === back) done(null); });
-    back.addEventListener("keydown", (e) => { if (e.key === "Escape") done(null); });
-    document.body.appendChild(back);
-    const input = back.querySelector("input");
-    input.focus(); input.select();
-  });
+export const cards = (kind) => (S.graph?.cards || []).filter((c) => c.kind === kind).sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+
+/* Карточки данного вида, лежащие непосредственно под родителем (связь «детализирует»). */
+export function childrenOf(parentId, kind) {
+  const ids = new Set((S.graph?.edges || []).filter((e) => e.to === parentId && e.kind === "детализирует").map((e) => e.from));
+  return cards(kind).filter((c) => ids.has(c.id));
 }
 
-export function when(ts) {
-  const d = new Date(ts * 1000);
-  const pad = (n) => String(n).padStart(2, "0");
-  const today = new Date().toDateString() === d.toDateString();
-  return (today ? "" : `${pad(d.getDate())}.${pad(d.getMonth() + 1)} `) + `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/* Роли сценария: по связям «участвует». */
+export function rolesOf(scenarioId) {
+  const ids = new Set((S.graph?.edges || []).filter((e) => e.from === scenarioId && e.kind === "участвует").map((e) => e.to));
+  return cards("роль").filter((c) => ids.has(c.id));
 }
 
-export function authorName(author) {
-  if (author === "human") return "человек";
-  if (author?.startsWith("package:")) return "пакет " + packageName(author.slice(8));
-  if (author === "council" || author?.startsWith("council")) return "совет";
-  return author || "";
-}
-
-export function packageName(id) {
-  return S.boot?.packages.find((p) => p.id === id)?.name || id;
-}
-
-/* Крупные этапы: порядок берётся из шагов пакетов (поле phase), без жёстко заданных названий. */
-export function allSteps() {
-  return [...stagePackages()].sort((a, b) => (a.order || 100) - (b.order || 100)).flatMap((pkg) =>
-    pkg.stage.steps.map((step) => ({pkg, step, st: (S.project?.stages?.[pkg.id]?.steps || []).find((s) => s.id === step.id) || {}})));
-}
-export function phases() {
-  const names = [];
-  for (const {step} of allSteps()) if (!names.includes(step.phase || "Этап")) names.push(step.phase || "Этап");
-  return names.map((name) => ({name, steps: allSteps().filter(({step}) => (step.phase || "Этап") === name)}));
-}
+export const records = (type) => S.bank.filter((r) => r.type === type);

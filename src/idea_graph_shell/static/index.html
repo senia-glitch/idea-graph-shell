@@ -14,19 +14,15 @@
   <span class="spacer"></span>
   <span id="saveState" class="hint"></span>
   <span id="zoomLabel" class="hint">100%</span>
-  <button id="addRootBtn" class="primary" title="Добавить сферу бизнеса. Сферы пишете только вы">+ Сфера</button>
-  <button id="fitBtn" title="Вписать граф в окно (двойной щелчок по фону)">Вписать</button>
-  <button id="undoBtn" title="Отменить последнее изменение графа">↶ Отменить</button>
+  <button id="fitBtn" title="Вписать граф в окно (двойной щелчок по фону)">Вписать граф</button>
   <button id="openBtn" title="Открыть другой проект или создать новый">Проекты…</button>
 </header>
-<div class="phase-bar" id="phaseBar" hidden></div>
 <main>
-  <section class="tab" id="tab-graph">
+  <section class="tab" id="tab-work">
+    <aside class="steps-panel" id="steps"></aside>
     <div id="canvas"></div>
-    <aside id="inspector" class="inspector" hidden></aside>
-    <aside class="dock" id="dock"></aside>
   </section>
-  <section class="tab" id="tab-doc"><div class="page doc-page" id="docPage"></div></section>
+  <section class="tab" id="tab-bank"><div id="bankPage" class="scroll"></div></section>
   <section class="tab" id="tab-settings"><div class="page" id="settingsPage"></div></section>
   <section class="tab on" id="tab-welcome"><div class="page" id="welcomePage"></div></section>
 </main>

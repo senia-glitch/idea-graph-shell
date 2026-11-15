@@ -1,6 +1,6 @@
 """Локальный веб-сервер оболочки: интерфейс для человека и мост для инструментов агента.
 
-Вся работа с агентами, этапами и банками — в ``idea-graph-engine``; здесь только HTTP и статические файлы.
+Вся работа с агентами, графом и банком — в ``idea-graph-engine``; здесь только HTTP и статические файлы.
 
 Слушает только 127.0.0.1. Запросы человека, которые что-то меняют, обязаны нести заголовок
 ``X-Idea-Graph`` (его не может поставить чужой сайт), запросы агента — ключ хода.
@@ -16,21 +16,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from idea_graph_core import HUMAN, GraphError, Store, author_name, views
+from idea_graph_core import GraphError, Store
 
-from idea_graph_engine import Adapters, EngineError, Project, Registry, Settings, resources
+from idea_graph_engine import Adapters, EngineError, Project, Settings
+from idea_graph_engine.flow import STEPS
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 4_000_000
 
 
 class App:
-    """Одна запущенная оболочка: настройки, пакеты и открытая идея."""
+    """Одна запущенная оболочка: настройки и открытый проект."""
 
-    def __init__(self, settings: Settings | None = None, registry: Registry | None = None,
-                 adapters: Adapters | None = None):
+    def __init__(self, settings: Settings | None = None, adapters: Adapters | None = None):
         self.settings = settings or Settings()
-        self.registry = registry or Registry()
         self.adapters = adapters or Adapters()
         self.project: Project | None = None
         self.base_url = ""
@@ -40,22 +39,20 @@ class App:
 
     def open(self, folder: str) -> Project:
         path = Path(folder).expanduser()
-        if not path.is_dir():
-            raise EngineError("no_folder", f"Папки нет: {path}")
+        if not path.is_dir() or not Store.exists(path):
+            raise EngineError("no_folder", f"В папке нет проекта: {path}")
         with self.lock:
-            project = Project(path, self.settings, self.registry, self.adapters)
+            project = Project(path, self.settings, self.adapters)
             project.base_url = self.base_url
             self.project = project
         self.settings.remember(str(project.folder))
         return project
 
     def projects_root(self) -> Path:
-        """Корневая папка проектов из настроек; по умолчанию «Документы\\Граф идеи»."""
         chosen = str(self.settings.data.get("projects_root") or "").strip()
         return Path(chosen).expanduser() if chosen else Path.home() / "Documents" / "Граф идеи"
 
     def projects(self) -> list[dict]:
-        """Проекты в корневой папке: её подпапки, где есть граф."""
         root = self.projects_root()
         found = []
         try:
@@ -72,10 +69,8 @@ class App:
         return found
 
     def create(self, title: str, parent: str = "") -> Project:
-        """Новый проект: подпапка с именем проекта в корневой папке (или в указанной)."""
         title = title.strip()
-        name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", title).strip(" .")
-        name = " ".join(name.split())
+        name = " ".join(re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", title).strip(" .").split())
         if not name:
             raise EngineError("invalid_input", "Введите название проекта")
         base = Path(parent).expanduser() if parent.strip() else self.projects_root()
@@ -93,32 +88,6 @@ class App:
 
     # ---------------------------------------------------------------- ответы на запросы
 
-    def history(self) -> dict:
-        project = self.need()
-        store = project.store
-        undone = store.undone_revisions()
-        entries = []
-        for entry in reversed(store.journal()[-300:]):
-            lines = []
-            for change in entry["changes"]:
-                before, after = change["before"], change["after"]
-                if change["type"] == "card":
-                    lines.append(views._card_change(before, after))
-                elif before is None:
-                    lines.append(f"добавлена связь {after['from']} —{after['kind']}→ {after['to']}")
-                elif after is None:
-                    lines.append(f"удалена связь {before['from']} —{before['kind']}→ {before['to']}")
-                else:
-                    lines.append(f"изменена связь {after['id']}: {after['from']} —{after['kind']}→ {after['to']}")
-            entries.append({"rev": entry["rev"], "ts": entry["ts"], "author": entry["author"],
-                            "author_name": author_name(entry["author"]), "note": entry.get("note", ""),
-                            "lines": lines, "undone": entry["rev"] in undone,
-                            "undo_of": entry.get("undo_of")})
-        deleted = [{"id": d["card"]["id"], "kind": d["card"]["kind"], "title": d["card"]["title"],
-                    "body": d["card"].get("body", ""), "rev": d["rev"], "ts": d["ts"],
-                    "author_name": author_name(d["author"])} for d in store.deleted_cards()]
-        return {"entries": entries, "deleted": deleted}
-
     def agents(self) -> dict:
         items = self.adapters.describe()
         for item in items:
@@ -127,43 +96,20 @@ class App:
         return {"agents": items}
 
     def boot(self) -> dict:
-        return {
-            "project": self.project.state() if self.project else None,
-            "packages": self.registry.public(),
-            "package_errors": self.registry.errors,
-            "settings": self.settings.data,
-            "projects_root": str(self.projects_root()),
-            "projects": self.projects(),
-            "views": [{"id": m["id"], "tab": m.get("tab") or m["name"]} for m in self.registry.items.values()
-                      if m["kind"] == "view"],
-        }
+        return {"project": self.project.state() if self.project else None, "steps": STEPS, "settings": self.settings.data,
+                "projects_root": str(self.projects_root()), "projects": self.projects()}
 
     def get(self, path: str, query: dict) -> dict:
         if path == "/api/boot":
             return self.boot()
         if path == "/api/state":
-            project = self.need()
-            return project.state(int(query.get("chat", ["0"])[0] or 0))
+            return self.need().state()
         if path == "/api/graph":
-            project = self.need()
-            return {**project.store.snapshot(), "layout": project.store.layout()}
-        if path == "/api/history":
-            return self.history()
+            return self.need().graph()
+        if path == "/api/bank":
+            return {"records": self.need().records()}
         if path == "/api/agents":
             return self.agents()
-        if path == "/api/resources":
-            return {"items": resources.load(self.need().dir)["items"]}
-        if path == "/api/stage":
-            return self.need().stage_status(query.get("package", [""])[0])
-        if path == "/api/document":
-            return {"markdown": self.need().document()}
-        if path == "/api/bank":
-            bank = self.need().store.bank(query.get("name", [""])[0])
-            kind = query.get("type", [""])[0] or None
-            return {"records": bank.list(kind)}
-        if path == "/api/card-history":
-            project = self.need()
-            return {"items": project.store.card_history(query.get("id", [""])[0])}
         raise EngineError("not_found", "Нет такого адреса")
 
     def post(self, path: str, data: dict) -> dict:
@@ -177,73 +123,22 @@ class App:
             adapter = self.adapters.get(str(data.get("agent") or ""))
             if adapter is None:
                 raise EngineError("invalid_input", "Нет такого агента")
-            version = adapter.version()
-            return {"found": bool(adapter.found()), "version": version, "path": adapter.found()}
+            return {"found": bool(adapter.found()), "version": adapter.version(), "path": adapter.found()}
         project = self.need()
-        if path == "/api/resources/add":
-            try:
-                return {"item": resources.add(project.dir, str(data.get("value") or ""))}
-            except resources.ResourceError as error:
-                raise EngineError("bad_resource", str(error)) from None
-        if path == "/api/resources/remove":
-            try:
-                resources.remove(project.dir, str(data.get("id") or ""))
-            except resources.ResourceError as error:
-                raise EngineError("bad_resource", str(error)) from None
-            return {"ok": True}
-        if path == "/api/stage/clear-stale":
-            return project.clear_stale(str(data.get("package") or ""), str(data.get("step") or ""))
-        if path == "/api/document/save":                  # сохранить документ файлом в папку проекта
-            target = project.folder / "Документ.md"
-            target.write_text(project.document(), encoding="utf-8")
-            return {"path": str(target)}
-        if path == "/api/proposals/apply":
-            return project.apply_proposal(str(data.get("id") or ""))
-        if path == "/api/bank/save":                      # правка банка человеком (например, списка конкурентов)
-            bank = project.store.bank(str(data.get("name") or ""))
-            record = dict(data.get("data") or {})
-            record.setdefault("state", "accepted")
-            if data.get("id"):
-                saved = bank.update(str(data["id"]), HUMAN, data=record, sources=data.get("sources"))
-            else:
-                saved = bank.put(str(data.get("type") or ""), record, HUMAN, sources=data.get("sources"),
-                                 key=str(data.get("key") or ""))
-            project._touch()
-            return {"record": saved}
-        if path == "/api/bank/remove":
-            project.store.bank(str(data.get("name") or "")).remove(str(data.get("id") or ""))
-            project._touch()
-            return {"ok": True}
-        if path == "/api/ops":
-            return project.human_ops(data.get("ops"), str(data.get("note") or ""))
+        if path == "/api/act":
+            return project.act(str(data.get("action") or ""), data)
+        if path == "/api/start":
+            ids = data.get("ids")
+            return project.start(str(data.get("kind") or ""), ids if isinstance(ids, list) else None, bool(data.get("redo")))
+        if path == "/api/stop":
+            return project.stop()
+        if path == "/api/answer":
+            choice = data.get("choice")
+            return project.answer(str(data.get("question") or ""), choice if isinstance(choice, dict) else {})
         if path == "/api/layout":
             project.store.save_layout(data)
             return {"ok": True}
-        if path == "/api/undo":
-            return project.undo(data.get("rev"))
-        if path == "/api/run/start":
-            auto = data.get("auto")
-            return project.start(str(data.get("package") or ""), bool(data.get("fresh")),
-                                 auto=auto if isinstance(auto, dict) else None,
-                                 step=str(data.get("step") or "") or None, action=str(data.get("action") or "") or None,
-                                 target=str(data.get("target") or "") or None, goal=str(data.get("goal") or ""),
-                                 phase=str(data.get("phase") or "") or None)
-        if path == "/api/run/stop":
-            return project.stop(str(data.get("package") or ""))
-        if path == "/api/run/propose":
-            return project.propose_for_stale(str(data.get("package") or ""))
-        if path == "/api/run/answer":
-            return project.answer(str(data.get("package") or ""), str(data.get("question") or ""),
-                                  data.get("choice") or {})
-        if path == "/api/run/message":
-            return project.message(str(data.get("package") or ""), str(data.get("text") or ""))
         raise EngineError("not_found", "Нет такого адреса")
-
-    def view_call(self, package_id: str, method: str, rest: str, data: dict) -> dict:
-        manifest = self.registry.get(package_id)
-        if manifest is None or not callable(manifest.get("api")):
-            raise EngineError("not_found", "У пакета нет своего экрана")
-        return manifest["api"](self, method, rest, data)
 
     def agent_call(self, token: str, path: str, data: dict) -> dict:
         project = self.need()
@@ -301,16 +196,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._json(work())
         except (EngineError, GraphError) as error:
-            self._json(error.as_dict(), 409 if getattr(error, "code", "") == "human_changed" else 400)
+            self._json(error.as_dict(), 400)
         except Exception as error:  # noqa: BLE001
-            if callable(getattr(error, "as_dict", None)):      # ошибка пакета, понятная человеку
-                self._json(error.as_dict(), 400)
-            else:
-                self._json({"error": "internal", "message": f"Внутренняя ошибка: {error}"}, 500)
+            self._json({"error": "internal", "message": f"Внутренняя ошибка: {error}"}, 500)
 
-    def _static(self, root: Path, rest: str) -> None:
-        target = (root / rest).resolve()
-        if not str(target).startswith(str(root.resolve())) or not target.is_file():
+    def _static(self, rest: str) -> None:
+        target = (STATIC / rest).resolve()
+        if not str(target).startswith(str(STATIC.resolve())) or not target.is_file():
             self._send(404, b"not found", "text/plain")
             return
         kind = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
@@ -324,18 +216,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local():
             return self._send(403, b"forbidden", "text/plain")
         url = urlparse(self.path)
-        path = url.path
-        if path.startswith("/api/"):
-            return self._run(lambda: self.app.get(path, parse_qs(url.query)))
-        if path.startswith("/pkg/"):
-            _, _, package_id, kind, *rest = path.split("/") + [""]
-            manifest = self.app.registry.get(package_id)
-            if kind == "static" and manifest and manifest.get("static"):
-                return self._static(Path(manifest["static"]), "/".join(p for p in rest if p))
-            if kind == "api":
-                return self._run(lambda: self.app.view_call(package_id, "GET", "/".join(p for p in rest if p), {}))
-            return self._send(404, b"not found", "text/plain")
-        return self._static(STATIC, "index.html" if path in ("/", "") else path.lstrip("/"))
+        if url.path.startswith("/api/"):
+            return self._run(lambda: self.app.get(url.path, parse_qs(url.query)))
+        return self._static("index.html" if url.path in ("/", "") else url.path.lstrip("/"))
 
     def do_POST(self):  # noqa: N802
         if not self._local():
@@ -347,9 +230,6 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("X-Idea-Graph") != "1":
             self._drain()
             return self._json({"error": "forbidden", "message": "Запрос не из интерфейса оболочки"}, 403)
-        if path.startswith("/pkg/"):
-            _, _, package_id, kind, *rest = path.split("/") + [""]
-            return self._run(lambda: self.app.view_call(package_id, "POST", "/".join(p for p in rest if p), self._body()))
         return self._run(lambda: self.app.post(path, self._body()))
 
 

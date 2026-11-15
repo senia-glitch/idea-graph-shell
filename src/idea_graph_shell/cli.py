@@ -14,12 +14,11 @@ from .server import App, make_server
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="idea-graph",
-        description="Оболочка графа идеи: холст, чат, настройки агентов и запуск пакетов.",
+        description="Граф идеи: от сферы бизнеса к проблемам для автоматизации и решению.",
     )
     parser.add_argument("folder", nargs="?", help="папка проекта (если не указана — откроется экран проектов)")
     parser.add_argument("--port", type=int, default=8765, help="порт (по умолчанию 8765; 0 — любой свободный)")
     parser.add_argument("--no-browser", action="store_true", help="не открывать браузер")
-    parser.add_argument("--packages", action="store_true", help="показать установленные пакеты и выйти")
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -28,12 +27,6 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     app = App()
-    if args.packages:
-        for item in app.registry.public():
-            print(f"{item['id']:<12} {item['kind']:<8} {item['name']} — {item['description']}")
-        for error in app.registry.errors:
-            print("ошибка пакета:", error)
-        return 0
     try:
         server = make_server(app, args.port)
     except OSError as error:

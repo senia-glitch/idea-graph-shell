@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "idea-graph-shell"
-version = "0.1.0"
-description = "Оболочка «Графа идеи»: веб-интерфейс (холст, карта этапа, чат, настройки) поверх движка"
+version = "0.2.0"
+description = "Оболочка «Графа идеи»: шаги слева, граф справа, банк знаний, настройки"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
