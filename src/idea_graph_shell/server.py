@@ -194,6 +194,8 @@ class App:
             if path.endswith("approve"):
                 return project.approve_step(package, step, bool(data.get("accept_all")))
             return project.reopen_step(package, step) if path.endswith("reopen") else project.clear_stale(package, step)
+        if path == "/api/stage/skip":
+            return project.skip_stage(str(data.get("package") or ""), bool(data.get("skipped")))
         if path == "/api/proposals/apply":
             return project.apply_proposal(str(data.get("id") or ""))
         if path == "/api/bank/save":                      # правка банка человеком (например, списка конкурентов)
@@ -223,7 +225,7 @@ class App:
             return project.start(str(data.get("package") or ""), bool(data.get("fresh")),
                                  auto=auto if isinstance(auto, dict) else None,
                                  step=str(data.get("step") or "") or None, action=str(data.get("action") or "") or None,
-                                 target=str(data.get("target") or "") or None)
+                                 target=str(data.get("target") or "") or None, goal=str(data.get("goal") or ""))
         if path == "/api/run/stop":
             return project.stop(str(data.get("package") or ""))
         if path == "/api/run/propose":

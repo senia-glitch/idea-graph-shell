@@ -325,3 +325,62 @@ svg.seq .seq-pain-mark{fill:#fff;font-size:11px;font-weight:800}
 .seq-pain-edit input,.seq-pain-edit select{margin:3px 4px 0 0;width:auto;font-size:12px;padding:3px 6px}
 .dock .map-hint{padding:6px 14px}
 @media (max-width:900px){.step{width:100%}.step-arrow{display:none}}
+
+/* ============ карта этапа: чек-лист и рабочая область ============ */
+.next-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 16px;margin-bottom:10px;background:var(--acc-soft);border:1px solid var(--acc);border-radius:var(--r-lg);font-weight:600}
+.next-banner .nb-icon{color:var(--acc);font-size:18px}
+.next-banner button{margin-left:auto}
+.flow-body{display:flex;gap:18px;align-items:flex-start;margin-top:12px}
+.checklist{width:292px;flex:none;display:flex;flex-direction:column;gap:12px;position:sticky;top:0}
+.cl-part{background:var(--panel);border:1px solid var(--line-soft);border-radius:var(--r-lg);padding:8px}
+.cl-part.skipped{opacity:.6}
+.cl-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 6px 8px}
+.cl-head .hint{margin-left:auto}
+button.link{background:none;border:0;padding:0 2px;color:var(--blue);font-size:12px}
+button.link:hover{background:none;text-decoration:underline;border:0}
+.cl-step{display:flex;gap:9px;align-items:center;padding:8px 9px;border-radius:var(--r);color:var(--txt);text-decoration:none;border:1px solid transparent}
+.cl-step:hover{background:var(--panel3);text-decoration:none}
+.cl-step.sel{background:var(--acc-soft);border-color:var(--acc)}
+.cl-icon{width:22px;text-align:center;flex:none;font-size:15px}
+.cl-step.s-approved .cl-icon{color:var(--green)}
+.cl-step.s-stale .cl-icon,.cl-step.s-asking .cl-icon{color:var(--yellow)}
+.cl-step.s-skipped{opacity:.55}
+.cl-text{display:flex;flex-direction:column;min-width:0;flex:1}
+.cl-text .hint{font-size:11px}
+.cl-badge{background:#c9a227;color:#221b04;border-radius:999px;font-size:11px;font-weight:800;min-width:20px;text-align:center;padding:0 6px}
+.cl-auto{padding:10px 12px;background:var(--panel3);border:1px solid var(--line-soft);border-radius:var(--r-lg)}
+.auto-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.auto-row select{width:auto;flex:1;min-width:0;padding:4px 8px}
+.workspace{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line-soft);border-radius:var(--r-lg);padding:18px 22px 22px}
+.ws-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ws-head h2{margin:0;font-size:21px}
+.step-n{width:26px;height:26px;border-radius:50%;background:#58a468;color:#10200f;font-weight:800;font-size:13px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.step-badge{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:2px 9px;border-radius:999px;background:#3d3e45;color:#d0d0d7}
+.step-badge.s-approved{background:#58a468;color:#10200f}
+.step-badge.s-stale,.step-badge.s-asking{background:#c9a227;color:#221b04}
+.step-badge.s-working{background:var(--blue);color:#0d1b2e}
+.ws-help{max-width:72ch;line-height:1.55;color:#dfe3e8;margin:10px 0 6px}
+.ws-warn{padding:8px 12px;margin:8px 0;border-radius:var(--r);background:rgba(232,195,58,.1);border:1px solid rgba(232,195,58,.4);color:#f0d58d;font-size:13px}
+.ws-act{display:flex;flex-direction:column;gap:10px;margin:14px 0;padding:14px;background:var(--panel3);border:1px solid var(--line-soft);border-radius:var(--r-lg)}
+.ws-act label{margin:0}
+.ws-target select{max-width:420px}
+.ws-buttons{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button.big{padding:9px 18px;font-size:14px}
+details.more{position:relative}
+details.more summary{list-style:none;cursor:pointer;padding:7px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);color:var(--txt);margin:0;font-size:13px}
+details.more summary::-webkit-details-marker{display:none}
+details.more[open] summary{border-color:var(--acc)}
+.more-menu{position:absolute;z-index:20;top:112%;left:0;display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);min-width:230px}
+.workspace h3{margin:22px 0 8px;font-size:15px}
+.ws-question .question{margin:6px 0 0}
+.issues{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.issue{display:flex;gap:10px;align-items:center;padding:7px 11px;border-radius:var(--r);background:var(--panel3);border:1px solid var(--line-soft)}
+.issue.t-stale,.issue.t-remark{border-color:rgba(232,195,58,.45)}
+.issue .i-icon{width:18px;text-align:center;color:var(--dim)}
+.issue .i-text{flex:1;min-width:0;overflow-wrap:anywhere}
+.issue .i-act{white-space:nowrap}
+.issue .i-act button{margin-left:5px;padding:2px 9px;font-size:12px}
+.ws-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:20px;padding-top:14px;border-top:1px solid var(--line-soft)}
+.qnotice{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;margin:10px 0;border:1px solid var(--acc);border-radius:var(--r-lg);background:var(--acc-soft)}
+.qnotice span{flex:1;min-width:180px}
+@media (max-width:1100px){.flow-body{flex-direction:column}.checklist{width:100%;position:static}}

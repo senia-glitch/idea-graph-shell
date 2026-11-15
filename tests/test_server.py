@@ -242,3 +242,21 @@ def test_resources_api(served, tmp_path):
     assert code == 400 and error["error"] == "bad_resource"
     assert http(served, "/api/resources/remove", {"id": "r1"})[0] == 200
     assert http(served, "/api/resources")[1]["items"] == []
+
+
+def test_skip_part_goal_and_issues_through_http(served, tmp_path):
+    create_project(served, tmp_path)
+    ops(served, {"op": "add_card", "kind": "сфера", "title": "Клиники"})
+    state = http(served, "/api/state")[1]["stages"]["st"]
+    assert state["skipped"] is False and state["steps"][0]["issues"] == [] and state["steps"][0]["runs"] == 0
+    assert http(served, "/api/stage/skip", {"package": "st", "skipped": True})[1]["skipped"] is True
+    assert http(served, "/api/state")[1]["stages"]["st"]["skipped"] is True
+    assert http(served, "/api/stage/skip", {"package": "none", "skipped": True})[0] == 400
+    assert http(served, "/api/run/start", {"package": "st", "step": "roles", "action": "suggest", "target": "c1",
+                                           "goal": "добавь врача"})[0] == 200
+    deadline = time.time() + 5
+    while time.time() < deadline and http(served, "/api/state")[1]["runs"]["st"]["status"] != "finished":
+        time.sleep(0.02)
+    run = http(served, "/api/state")[1]["runs"]["st"]
+    assert "ЧТО УЛУЧШИТЬ (задача человека): добавь врача" in run["summary"]
+    assert http(served, "/api/state")[1]["stages"]["st"]["steps"][0]["runs"] == 1

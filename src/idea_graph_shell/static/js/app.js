@@ -4,7 +4,7 @@ import {createCanvas} from "./canvas.js";
 import {$, S, act, api, emit, esc, on, preloadModules, stagePackages, toast} from "./core.js";
 import {initDock, renderDock} from "./dock.js";
 import {initGraph, loadGraph, resetGraphView} from "./graph.js";
-import {initMap, renderMap} from "./map.js";
+import {initMap, renderMap, selectStep} from "./map.js";
 import {renderSettings} from "./settings.js";
 
 let tab = "welcome";
@@ -21,6 +21,7 @@ function tabs() {
 async function show(next) {
   tab = next;
   document.querySelectorAll("main > .tab").forEach((el) => el.classList.toggle("on", el.id === "tab-" + next));
+  S.inlineQuestions = next === "map";          // на карте вопросы агента отвечаются в рабочей области шага
   // правая панель (чат и вопросы агента) общая для графа и карты этапа
   if (next === "graph" || next === "map") document.getElementById("tab-" + next).appendChild($("dock"));
   for (const id of ["zoomLabel", "fitBtn"]) $(id).style.display = next === "graph" ? "" : "none";
@@ -139,6 +140,7 @@ async function main() {
   initDock();
   initMap();
   on("goto-graph", async (id) => { await show("graph"); emit("reveal", id); });
+  on("goto-map", async ({package: pkg, step}) => { await show("map"); selectStep(pkg, step); });
   on("poll", poll);
   try {
     await openProject();

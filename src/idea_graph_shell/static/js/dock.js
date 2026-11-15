@@ -146,7 +146,7 @@ function openQuestions() {
   return out.sort((a, b) => (a.package === S.pkg ? -1 : 0) - (b.package === S.pkg ? -1 : 0));
 }
 
-function questionHtml(q) {
+export function questionHtml(q) {
   const picked = D.picked[q.id] || [];
   const options = q.options.map((o, i) => `
     <button class="option${(q.recommended || []).includes(i + 1) ? " rec" : ""}${picked.includes(i + 1) ? " picked" : ""}" data-q="${q.id}" data-pkg="${q.package}" data-toggle="${i + 1}">
@@ -169,7 +169,7 @@ function questionHtml(q) {
   </div>`;
 }
 
-function bindQuestions(body) {
+export function bindQuestions(body) {
   body.querySelectorAll("[data-custom]").forEach((area) => {
     area.addEventListener("input", () => { D.custom[area.dataset.custom] = area.value; });
   });
@@ -235,10 +235,20 @@ function renderBody() {
   return renderHistory(body);
 }
 
+const stagePkg = (id) => S.boot?.packages.find((p) => p.id === id)?.stage;
+
+/* На вкладке «Карта этапа» вопрос агента отвечается в рабочей области шага; здесь — только напоминание. */
+function questionNotice(q) {
+  const run = S.project?.runs?.[q.package];
+  const step = run?.step && stagePkg(q.package)?.steps.find((s) => s.id === run.step);
+  return `<div class="qnotice"><span>Агент ждёт вашего ответа${step ? ` на шаге «${esc(step.title)}»` : ""}: <b>${esc(q.question)}</b></span>
+    ${step ? `<button class="primary" data-goto-step="${esc(step.id)}" data-pkg="${esc(q.package)}">Открыть шаг</button>` : ""}</div>`;
+}
+
 function renderChat(body) {
   const typing = body.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA";
   const questions = openQuestions();
-  const signature = JSON.stringify([S.chat.length, S.chat.at(-1)?.seq, questions.map((q) => q.id + q.deferred), JSON.stringify(D.picked), S.pkg, graphIndex().cards.size, Object.values(S.project.runs).map((r) => r.status)]);
+  const signature = JSON.stringify([S.chat.length, S.chat.at(-1)?.seq, questions.map((q) => q.id + q.deferred), JSON.stringify(D.picked), !!S.inlineQuestions, S.pkg, graphIndex().cards.size, Object.values(S.project.runs).map((r) => r.status)]);
   if (body.dataset.sig === signature && body.dataset.tab === "chat") return;
   if (typing && body.dataset.tab === "chat" && JSON.stringify(questions.map((q) => q.id)) === body.dataset.qs) return;   // не сбиваем ввод своего ответа
   const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 60 || body.dataset.tab !== "chat";
@@ -250,8 +260,11 @@ function renderChat(body) {
   body.innerHTML =
     (S.chat.length ? S.chat.filter((m) => !(m.kind === "question" && questions.some((q) => q.id === m.qid))).map(chatLine).join("") : '<div class="empty">Напишите сферу бизнеса («+ Сфера» вверху) и откройте «Карту этапа»: у каждого шага есть помощник — предложить, проверить, уточнить. Вопросы агента появятся здесь, с готовыми вариантами ответа.</div>') +
     busy.map((r) => `<div class="thinking">${esc(packageName(r.package))}: ${r.status === "deciding" ? "совет решает" : r.status === "researching" ? "исследователи ищут информацию" : "агент думает"}<span class="dots"></span></div>`).join("") +
-    questions.map(questionHtml).join("");
+    questions.map((q) => (S.inlineQuestions && stagePkg(q.package) ? questionNotice(q) : questionHtml(q))).join("");
   bindQuestions(body);
+  body.querySelectorAll("[data-goto-step]").forEach((button) => {
+    button.onclick = () => emit("goto-map", {package: button.dataset.pkg, step: button.dataset.gotoStep});
+  });
   if (stick) body.scrollTop = body.scrollHeight;
   const current = questions.find((q) => !q.deferred) || questions[0];
   emit("highlight", current ? (current.cards || []).concat(current.revisits || []) : []);
