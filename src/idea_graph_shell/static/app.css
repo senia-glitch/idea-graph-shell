@@ -221,6 +221,8 @@ button.ghost{background:none}
 .block{border:1px solid var(--line-soft);border-radius:var(--r-lg);padding:12px 14px;margin:0 0 14px;background:var(--panel3)}
 .block .bhead{font-size:15px;margin-bottom:2px}
 .block.sum div{font-size:13px}
+.sub-block{border-left:2px solid var(--line, #444);padding-left:10px;margin:6px 0 10px}
+.sub-block .lbl{margin-top:8px;text-transform:none;letter-spacing:0;font-size:12px}
 .bar{display:flex;gap:8px;align-items:center;margin-top:20px;padding-top:14px;border-top:1px solid var(--line-soft)}
 .runbox{display:flex;align-items:center;gap:10px;padding:9px 12px;margin:0 0 12px;border-radius:var(--r);background:var(--panel3);border:1px solid var(--line)}
 .runbox.ok{border-color:rgba(127,201,127,.5);color:var(--green)}

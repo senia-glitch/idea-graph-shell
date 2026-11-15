@@ -9,6 +9,8 @@ const run = () => S.project?.run;
 const busy = () => BUSY.includes(run()?.status);
 const dis = () => (busy() ? " disabled" : "");
 const accepted = (list) => list.filter((c) => c.status === "accepted");
+/* Непринятые сверху, принятые уходят вниз: следующая карточка для решения всегда на виду. Порядок внутри групп сохраняется. */
+const pendingFirst = (list) => [...list].sort((a, b) => (a.status === "accepted") - (b.status === "accepted"));
 
 // ---------------------------------------------------------------------- готовность шагов
 
@@ -118,7 +120,7 @@ function stepAnalysis() {
 }
 
 function stepRoles() {
-  const list = cards("роль");
+  const list = pendingFirst(cards("роль"));
   const rows = list.map((c) => row(esc(c.title), esc(c.body || ""), cardActions(c), c.status === "proposed" ? tag("предложена", "warn") : ""));
   return `<p class="sub">Кто участвует в бизнес-процессах. Помощник предлагает по банку знаний и сфере; вы принимаете, отклоняете или пишете свои.</p>
     <div class="top">${start("roles", list.length ? "Предложить ещё" : "Предложить роли", "", list.length ? "" : "primary")}</div>
@@ -127,7 +129,7 @@ function stepRoles() {
 
 function stepScenarios() {
   const roles = accepted(cards("роль"));
-  const list = cards("сценарий");
+  const list = pendingFirst(cards("сценарий"));
   const blocks = list.map((c) => `<div class="block">${row(esc(c.title), esc(c.body || ""), cardActions(c), c.status === "proposed" ? tag("предложен", "warn") : "")}
     ${usecaseSvg(c.attrs?.usecase)}</div>`);
   const checks = roles.map((r) => `<label class="check"><input type="checkbox" name="roles" value="${esc(r.title)}"${dis()}> ${esc(r.title)}</label>`).join("");
@@ -153,7 +155,7 @@ function stepAsis() {
   const scenarios = accepted(cards("сценарий"));
   if (!scenarios.length) return '<div class="empty">Нет принятых сценариев. Вернитесь на шаг «Сценарии».</div>';
   const blocks = scenarios.map((s) => {
-    const problems = childrenOf(s.id, "проблема");
+    const problems = pendingFirst(childrenOf(s.id, "проблема"));
     const okProblems = accepted(problems).length;
     return `<div class="block"><div class="bhead"><b>${esc(s.title)}</b></div>
       <div class="lbl">Проблемы сценария</div>
@@ -174,28 +176,34 @@ function stepSolution() {
   const scenarios = accepted(cards("сценарий"));
   if (!scenarios.length) return '<div class="empty">Нет принятых сценариев. Вернитесь на шаг «Сценарии».</div>';
   const blocks = scenarios.map((s) => {
-    const variants = childrenOf(s.id, "вариант");
-    const chosen = accepted(variants)[0];
+    const problems = accepted(childrenOf(s.id, "проблема")).sort((a, b) => (accepted(childrenOf(a.id, "вариант")).length > 0) - (accepted(childrenOf(b.id, "вариант")).length > 0));
+    const solvedCount = problems.filter((p) => accepted(childrenOf(p.id, "вариант")).length).length;
+    const items = problems.map((p) => {
+      const variants = pendingFirst(childrenOf(p.id, "вариант"));
+      return `<div class="sub-block"><div class="lbl">Проблема: ${esc(p.title)}${p.attrs?.importance ? ` ${tag(p.attrs.importance, "warn")}` : ""}</div>
+        ${variants.map((v) => row(esc(v.title), esc(v.body || ""),
+          v.status === "accepted" ? btn("Удалить", `data-act="remove" data-id="${v.id}"`, "ghost") : btn("Выбрать", `data-act="choose_variant" data-id="${v.id}"`) + btn("Отклонить", `data-act="remove" data-id="${v.id}"`),
+          v.status === "accepted" ? tag("выбран", "ok") : "")).join("") || '<div class="hint">Вариантов пока нет.</div>'}
+        <form class="add" data-form="add_variant" data-problem="${p.id}"><input name="title" placeholder="Свой вариант решения" autocomplete="off"${dis()}><button${dis()}>Добавить</button></form>
+        <div class="top">${start("variants", "Предложить варианты", `data-ids="${p.id}"`)}</div></div>`;
+    }).join("");
     return `<div class="block"><div class="bhead"><b>${esc(s.title)}</b></div>
-      <div class="lbl">Как автоматизировать (выберите один вариант)</div>
-      ${variants.map((v) => row(esc(v.title), esc(v.body || ""),
-        v.status === "accepted" ? btn("Удалить", `data-act="remove" data-id="${v.id}"`, "ghost") : btn("Выбрать", `data-act="choose_variant" data-id="${v.id}"`) + btn("Отклонить", `data-act="remove" data-id="${v.id}"`),
-        v.status === "accepted" ? tag("выбран", "ok") : "")).join("") || '<div class="hint">Вариантов пока нет.</div>'}
-      <form class="add col" data-form="add_variant" data-scenario="${s.id}"><input name="title" placeholder="Свой вариант" autocomplete="off"${dis()}><button${dis()}>Добавить</button></form>
-      <div class="top">${start("variants", "Предложить варианты", `data-ids="${s.id}"`)}</div>
+      ${items || '<div class="hint">Нет принятых проблем. Вернитесь на шаг «Как есть».</div>'}
       <div class="lbl">Диаграмма «решение» (как будет)</div>
-      ${chosen ? `<div class="top">${start("solution", childrenOf(s.id, "решение").length ? "Построить заново" : "Построить диаграмму", `data-ids="${s.id}"`, "primary")}</div>`
-        : '<div class="hint">Выберите вариант — по нему помощник построит диаграмму. Или напишите шаги сами.</div>'}
+      ${solvedCount ? `<div class="top">${start("solution", childrenOf(s.id, "решение").length ? "Построить заново" : "Построить диаграмму", `data-ids="${s.id}"`, "primary")}</div>`
+        : '<div class="hint">Выберите вариант решения хотя бы для одной проблемы — по выбранным решениям помощник построит диаграмму. Проблемы без решения остаются в ней как есть. Или напишите шаги сами.</div>'}
       ${diagramEditor(s, "solution", "решение")}</div>`;
   });
   const summary = scenarios.map((s) => {
-    const problems = accepted(childrenOf(s.id, "проблема")), variant = accepted(childrenOf(s.id, "вариант"))[0];
-    if (!problems.length && !variant) return "";
-    return `<div class="block sum"><b>${esc(s.title)}</b>${problems.map((p) => `<div>• ${esc(p.title)}${p.attrs?.importance ? ` <span class="hint">(${esc(p.attrs.importance)})</span>` : ""}</div>`).join("")}
-      ${variant ? `<div class="hint">Автоматизация: ${esc(variant.title)}</div>` : ""}</div>`;
+    const problems = accepted(childrenOf(s.id, "проблема"));
+    if (!problems.length) return "";
+    return `<div class="block sum"><b>${esc(s.title)}</b>${problems.map((p) => {
+      const v = accepted(childrenOf(p.id, "вариант"))[0];
+      return `<div>• ${esc(p.title)}${p.attrs?.importance ? ` <span class="hint">(${esc(p.attrs.importance)})</span>` : ""}${v ? ` → <b>${esc(v.title)}</b>` : ' <span class="hint">— решения нет</span>'}</div>`;
+    }).join("")}</div>`;
   }).join("");
-  return `<p class="sub">Сначала варианты автоматизации, потом UML-диаграмма последовательности «как будет» с отличиями от «как есть».</p>
-    <div class="top">${start("variants", "Предложить варианты для всех", "", "primary")}</div>${blocks.join("")}
+  return `<p class="sub">Для каждой принятой проблемы выберите вариант её решения. По выбранным решениям строится UML-диаграмма последовательности «как будет».</p>
+    <div class="top">${start("variants", "Предложить варианты для всех проблем", "", "primary")}</div>${blocks.join("")}
     ${summary ? `<div class="lbl">Итог: что стоит автоматизировать</div>${summary}` : ""}`;
 }
 
@@ -243,6 +251,7 @@ export function initSteps() {
     e.preventDefault();
     const d = formData(form), action = form.dataset.form;
     if (form.dataset.scenario) d.scenario = form.dataset.scenario;
+    if (form.dataset.problem) d.problem = form.dataset.problem;
     act(async () => {
       await api("/api/act", {action, ...d});
       delete U.text.sphere;
