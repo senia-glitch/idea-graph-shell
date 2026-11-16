@@ -139,17 +139,39 @@ function stepAnalysis() {
     ${rows.join("") || '<div class="empty">Нет принятых конкурентов. Вернитесь на шаг «Конкуренты».</div>'}`;
 }
 
+const ROLE_TYPES = ["человек", "внешняя система", "компонент"];
+const typeOptions = (current) => ROLE_TYPES.map((t) => `<option${t === current ? " selected" : ""}>${t}</option>`).join("");
+
+/* Правка роли вручную: название, описание, тип. Форма раскрывается под строкой роли. */
+function roleEditor(c, current) {
+  return `<details class="steps-box"><summary>Изменить</summary>
+    <form class="add col" data-form="edit_role" data-id="${c.id}">
+      <input name="title" value="${esc(c.title)}" placeholder="Название" autocomplete="off"${dis()}>
+      <input name="body" value="${esc(c.body || "")}" placeholder="Что делает" autocomplete="off"${dis()}>
+      <select name="type"${dis()}>${typeOptions(current)}</select>
+      <button${dis()}>Сохранить</button></form></details>`;
+}
+
 function stepRoles() {
   const list = pendingFirst(cards("роль"));
   const type = (c) => c.attrs?.type || "человек";
-  const rows = list.map((c) => row(esc(c.title), esc(c.body || ""), cardActions(c),
-    tag(type(c), type(c) === "компонент" ? "ok" : "") + (c.status === "proposed" ? tag("предложена", "warn") : "")));
+  const rows = list.map((c) => `<div class="role">${row(esc(c.title), esc(c.body || ""), cardActions(c),
+    tag(type(c), type(c) === "компонент" ? "ok" : "") + (c.status === "proposed" ? tag("предложена", "warn") : ""))}${roleEditor(c, type(c))}</div>`);
   const hasComponent = accepted(cards("роль")).some((c) => type(c) === "компонент");
-  const typeSelect = `<select name="type"${dis()}><option>человек</option><option>внешняя система</option><option>компонент</option></select>`;
-  return `<p class="sub">Единое пространство имён: из этого списка берутся ВСЕ участники диаграмм, других имён не будет. Три типа: человек, внешняя система и компонент разрабатываемой системы (Сайт, Админка…). Нужен хотя бы один компонент. Помощник предлагает по границам и сфере; вы принимаете, отклоняете или пишете свои.</p>
+  const waiting = list.some((c) => c.status === "proposed");
+  const confirmed = !!S.project?.roles_confirmed;
+  const typeSelect = `<select name="type"${dis()}>${typeOptions("человек")}</select>`;
+  let confirm = "";
+  if (confirmed) {
+    confirm = `<div class="runbox ok"><span>Список ролей подтверждён: помощник и автопилот его не меняют. «Предложить ещё» и «Улучшить уже есть» открывают его снова.</span></div>`;
+  } else if (hasComponent) {
+    confirm = `<div class="block"><div class="hint">Проверьте список, поправьте кнопкой «Изменить» и подтвердите: дальше агенты роли не меняют, пока вы сами не попросите.${waiting ? " Сначала примите или отклоните предложенные роли." : ""}</div>
+      <div class="top">${btn("Подтвердить список ролей", 'data-act="confirm_roles"', waiting ? "" : "primary")}</div></div>`;
+  }
+  return `<p class="sub">Единое пространство имён: из этого списка берутся ВСЕ участники диаграмм, других имён не будет. Три типа: человек, внешняя система и компонент разрабатываемой системы (Сайт, Админка…). Нужен хотя бы один компонент. Помощник предлагает по границам и сфере; вы принимаете, отклоняете, правите или пишете свои, затем подтверждаете список.</p>
     ${list.length && !hasComponent ? '<div class="err">Нет принятого компонента системы: без него нельзя строить диаграммы. Добавьте свой или нажмите «Предложить ещё».</div>' : ""}
     <div class="top">${start("roles", list.length ? "Предложить ещё" : "Предложить роли и компоненты", "", list.length ? "" : "primary")}</div>
-    ${rows.join("") || '<div class="empty">Ролей и компонентов пока нет.</div>'}${addForm("add_role", "Своя роль или компонент", typeSelect)}`;
+    ${rows.join("") || '<div class="empty">Ролей и компонентов пока нет.</div>'}${addForm("add_role", "Своя роль или компонент", typeSelect)}${confirm}`;
 }
 
 function stepScenarios() {
@@ -277,6 +299,7 @@ export function initSteps() {
     const d = formData(form), action = form.dataset.form;
     if (form.dataset.scenario) d.scenario = form.dataset.scenario;
     if (form.dataset.problem) d.problem = form.dataset.problem;
+    if (form.dataset.id) d.id = form.dataset.id;
     act(async () => {
       await api("/api/act", {action, ...d});
       delete U.text.sphere;
