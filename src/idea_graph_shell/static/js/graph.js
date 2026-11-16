@@ -54,9 +54,9 @@ export function initGraph() {
     onEdgeSelect: () => {},
   });
   $("fitBtn").onclick = () => canvas.fit();
-  $("exportBtn").onclick = () => act(async () => {
-    const out = await api("/api/act", {action: "export_md"});
-    toast("Документация записана: " + out.path);
+  $("exportBtn").onclick = () => act(async () => {          // сначала проверка согласованности графа с вопросами, потом файл
+    await api("/api/start", {kind: "export"});
+    toast("Проверяю согласованность графа перед выгрузкой…");
   });
   $("composeBtn").onclick = () => { if (canvas.compose()) $("undoComposeBtn").style.display = ""; };
   $("undoComposeBtn").onclick = () => { canvas.undoCompose(); $("undoComposeBtn").style.display = "none"; };

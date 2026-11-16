@@ -53,7 +53,7 @@ const RUN_STEP = {autopilot: 0, competitors: 1, analysis: 2, roles: 3, scenarios
 function runBlock() {
   const r = run();
   if (!r) return "";
-  if (!BUSY.includes(r.status) && RUN_STEP[r.kind] !== S.step) return "";       // итог прошлой работы виден только на своём шаге
+  if (!BUSY.includes(r.status) && RUN_STEP[r.kind] !== S.step && r.kind !== "export") return "";       // итог прошлой работы виден только на своём шаге; итог выгрузки — на любом
   const notes = (r.notes || []).map((n) => `<div class="hint">${esc(n)}</div>`).join("");
   if (r.status === "running") {
     const progress = r.total > 1 ? ` · ${r.done} из ${r.total}` : "";
@@ -71,6 +71,12 @@ function questionBlock(q) {
   const options = q.options.map((o, i) => `<button class="option${q.recommended.includes(i + 1) ? " rec" : ""}${picked.includes(i + 1) ? " picked" : ""}" data-pick="${i + 1}" data-q="${q.id}">
     <span class="num">${picked.includes(i + 1) ? "✓" : ""}</span><span class="otext"><b>${esc(o.title)}</b>${o.consequence ? `<span class="cons">${esc(o.consequence)}</span>` : ""}
     ${q.recommended.includes(i + 1) ? `<span class="recmark">рекомендует помощник${q.reason ? ": " + esc(q.reason) : ""}</span>` : ""}</span></button>`).join("");
+  if (q.single) {          // разногласие при выгрузке: один вариант, каждый — правка графа; «оставить» и «ни один» нет
+    return `<div class="question"><div class="lbl">Разногласие в графе</div><div class="qtext">${esc(q.question)}</div>
+      <div class="hint">Выберите, как исправить. Правка применяется в графе, документ строится по исправленному графу.</div>
+      <div class="options">${options}</div>
+      <div class="row-actions"><button data-stop>Отменить выгрузку</button><button class="primary" data-answer="send" data-q="${q.id}">Применить</button></div></div>`;
+  }
   return `<div class="question"><div class="qtext">${esc(q.question)}</div>
     <div class="hint">Отметьте один или несколько вариантов, можно дописать своё.</div>
     <div class="options">${options}</div>
@@ -292,7 +298,8 @@ export function initSteps() {
     }
     if (d.pick) {
       const list = U.picked[d.q] || (U.picked[d.q] = []), n = Number(d.pick), at = list.indexOf(n);
-      if (at >= 0) list.splice(at, 1); else list.push(n);
+      if (run()?.question?.single) U.picked[d.q] = [n];            // разногласие: выбирается ровно один вариант
+      else if (at >= 0) list.splice(at, 1); else list.push(n);
       return renderSteps(true);
     }
     if (d.answer) {
