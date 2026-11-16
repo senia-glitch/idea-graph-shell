@@ -129,7 +129,8 @@ class App:
             return project.act(str(data.get("action") or ""), data)
         if path == "/api/start":
             ids = data.get("ids")
-            return project.start(str(data.get("kind") or ""), ids if isinstance(ids, list) else None, bool(data.get("redo")))
+            return project.start(str(data.get("kind") or ""), ids if isinstance(ids, list) else None, bool(data.get("redo")),
+                                 bool(data.get("each")))
         if path == "/api/stop":
             return project.stop()
         if path == "/api/answer":

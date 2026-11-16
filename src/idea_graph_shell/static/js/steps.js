@@ -3,7 +3,7 @@
 import {$, S, act, api, cards, childrenOf, emit, esc, records, rolesOf, toast} from "./core.js";
 import {sequenceSvg, stepsText, usecaseSvg} from "./diagrams.js";
 
-const U = {picked: {}, text: {}};           // что человек ввёл, но ещё не отправил: переживает перерисовку
+const U = {picked: {}, text: {}, each: false};           // что человек ввёл, но ещё не отправил: переживает перерисовку
 const BUSY = ["running", "asking"];
 const run = () => S.project?.run;
 const busy = () => BUSY.includes(run()?.status);
@@ -53,7 +53,7 @@ const RUN_STEP = {autopilot: 0, competitors: 1, analysis: 2, roles: 3, scenarios
 function runBlock() {
   const r = run();
   if (!r) return "";
-  if (!BUSY.includes(r.status) && RUN_STEP[r.kind] !== S.step && r.kind !== "export") return "";       // итог прошлой работы виден только на своём шаге; итог выгрузки — на любом
+  if (!BUSY.includes(r.status) && RUN_STEP[r.kind] !== S.step && !r.kind.startsWith("export")) return "";       // итог прошлой работы виден только на своём шаге; итог выгрузки — на любом
   const notes = (r.notes || []).map((n) => `<div class="hint">${esc(n)}</div>`).join("");
   if (r.status === "running") {
     const progress = r.total > 1 ? ` · ${r.done} из ${r.total}` : "";
@@ -69,8 +69,8 @@ function runBlock() {
 function questionBlock(q) {
   const picked = U.picked[q.id] || [];
   const options = q.options.map((o, i) => `<button class="option${q.recommended.includes(i + 1) ? " rec" : ""}${picked.includes(i + 1) ? " picked" : ""}" data-pick="${i + 1}" data-q="${q.id}">
-    <span class="num">${picked.includes(i + 1) ? "✓" : ""}</span><span class="otext"><b>${esc(o.title)}</b>${o.consequence ? `<span class="cons">${esc(o.consequence)}</span>` : ""}
-    ${q.recommended.includes(i + 1) ? `<span class="recmark">рекомендует помощник${q.reason ? ": " + esc(q.reason) : ""}</span>` : ""}</span></button>`).join("");
+    <span class="num">${picked.includes(i + 1) ? "✓" : ""}</span><span class="otext"><b>${esc(o.title)}</b>
+    ${q.recommended.includes(i + 1) ? '<span class="recmark">рекомендует помощник</span>' : ""}</span></button>`).join("");
   if (q.single) {          // разногласие при выгрузке: один вариант, каждый — правка графа; «оставить» и «ни один» нет
     return `<div class="question"><div class="lbl">Разногласие в графе</div><div class="qtext">${esc(q.question)}</div>
       <div class="hint">Выберите, как исправить. Правка применяется в графе, документ строится по исправленному графу.</div>
@@ -107,7 +107,9 @@ function pilotBlock() {
       <div class="top">${start("autopilot", "Довести до согласования", "", "primary")}${start("autopilot", "Улучшить уже есть", 'data-redo="1"')}</div>`
     : `<div class="hint">Проект пуст: автопилот построит всё с нуля.</div><div class="top">${start("autopilot", "Построить автоматически", "", "primary")}</div>`;
   return `<div class="block"><div class="lbl">Автопилот</div>
-    <div class="hint">Сначала сильная модель анализирует, что уже есть, и (если границ ещё нет) задаёт до 15 вопросов о границах системы. Затем сама проходит цепочку. Всё можно поправить вручную, «Стоп» останавливает.</div>${how}</div>`;
+    <div class="hint">Сначала сильная модель анализирует, что уже есть, и (если границ ещё нет) задаёт до 15 вопросов о границах системы. Затем сама проходит цепочку. Всё можно поправить вручную, «Стоп» останавливает.</div>
+    <label class="check"><input type="checkbox" data-each${U.each ? " checked" : ""}${dis()}> По сценариям: по одному, каждый до «решения», следующий учитывает прежние
+      <span class="hint">Агент сам решает, когда остановиться: строит только основное и самое важное.</span></label>${how}</div>`;
 }
 
 function stepCompetitors() {
@@ -277,6 +279,7 @@ export function initSteps() {
       refresh();
     });
   });
+  root.addEventListener("change", (e) => { if (e.target.dataset?.each !== undefined) U.each = e.target.checked; });
   root.addEventListener("click", (e) => {
     const el = e.target.closest("button");
     if (!el) return;
@@ -285,7 +288,7 @@ export function initSteps() {
     if (d.stop !== undefined) return void act(async () => { await api("/api/stop", {}); refresh(); });
     if (d.start) {
       const ids = d.ids ? d.ids.split(",") : undefined;
-      return void act(async () => { await api("/api/start", {kind: d.start, ids, redo: "redo" in d}); refresh(); });
+      return void act(async () => { await api("/api/start", {kind: d.start, ids, redo: "redo" in d, each: d.start === "autopilot" && U.each}); refresh(); });
     }
     if (d.act) {
       const {act: action, ...rest} = d;

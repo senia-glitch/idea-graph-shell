@@ -58,6 +58,10 @@ export function initGraph() {
     await api("/api/start", {kind: "export"});
     toast("Проверяю согласованность графа перед выгрузкой…");
   });
+  $("exportAutoBtn").onclick = () => act(async () => {      // то же без вопросов: агент сам убирает вне границ и спорное
+    await api("/api/start", {kind: "export_auto"});
+    toast("Автоматическая проверка и правка графа…");
+  });
   $("composeBtn").onclick = () => { if (canvas.compose()) $("undoComposeBtn").style.display = ""; };
   $("undoComposeBtn").onclick = () => { canvas.undoCompose(); $("undoComposeBtn").style.display = "none"; };
 }

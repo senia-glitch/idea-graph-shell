@@ -22,7 +22,8 @@ export function stepsText(diagram) {
   return (diagram?.steps || []).map((s, i) => {
     const sign = SIGNS[s.mark] ? SIGNS[s.mark] + " " : "";
     const pain = s.pain && (s.pain.what || s.pain.often) ? ` [боль: ${[s.pain.what, s.pain.often, s.pain.cost, s.pain.importance].map((x) => x || "").join(" | ")}]` : "";
-    return `${i + 1}. ${sign}${s.from} → ${s.to}: ${s.text}${pain}`;
+    const by = s.by ? ` [решение: ${s.by}]` : "";
+    return `${i + 1}. ${sign}${s.from} → ${s.to}: ${s.text}${pain}${by}`;
   }).join("\n");
 }
 
