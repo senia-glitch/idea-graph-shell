@@ -141,10 +141,15 @@ function stepAnalysis() {
 
 function stepRoles() {
   const list = pendingFirst(cards("роль"));
-  const rows = list.map((c) => row(esc(c.title), esc(c.body || ""), cardActions(c), c.status === "proposed" ? tag("предложена", "warn") : ""));
-  return `<p class="sub">Кто участвует в бизнес-процессах. Помощник предлагает по банку знаний и сфере; вы принимаете, отклоняете или пишете свои.</p>
-    <div class="top">${start("roles", list.length ? "Предложить ещё" : "Предложить роли", "", list.length ? "" : "primary")}</div>
-    ${rows.join("") || '<div class="empty">Ролей пока нет.</div>'}${addForm("add_role", "Своя роль")}`;
+  const type = (c) => c.attrs?.type || "человек";
+  const rows = list.map((c) => row(esc(c.title), esc(c.body || ""), cardActions(c),
+    tag(type(c), type(c) === "компонент" ? "ok" : "") + (c.status === "proposed" ? tag("предложена", "warn") : "")));
+  const hasComponent = accepted(cards("роль")).some((c) => type(c) === "компонент");
+  const typeSelect = `<select name="type"${dis()}><option>человек</option><option>внешняя система</option><option>компонент</option></select>`;
+  return `<p class="sub">Единое пространство имён: из этого списка берутся ВСЕ участники диаграмм, других имён не будет. Три типа: человек, внешняя система и компонент разрабатываемой системы (Сайт, Админка…). Нужен хотя бы один компонент. Помощник предлагает по границам и сфере; вы принимаете, отклоняете или пишете свои.</p>
+    ${list.length && !hasComponent ? '<div class="err">Нет принятого компонента системы: без него нельзя строить диаграммы. Добавьте свой или нажмите «Предложить ещё».</div>' : ""}
+    <div class="top">${start("roles", list.length ? "Предложить ещё" : "Предложить роли и компоненты", "", list.length ? "" : "primary")}</div>
+    ${rows.join("") || '<div class="empty">Ролей и компонентов пока нет.</div>'}${addForm("add_role", "Своя роль или компонент", typeSelect)}`;
 }
 
 function stepScenarios() {

@@ -22,7 +22,7 @@ class ScriptAdapter(Adapter):
 
     def run(self, request):
         project, token = request.extra["project"], request.extra["token"]
-        project.tool_call(token, "graph_apply", {"ops": [{"op": "add_card", "kind": "роль", "title": "Клиент", "body": "записывается"}]})
+        project.tool_call(token, "graph_apply", {"ops": [{"op": "add_card", "kind": "роль", "title": "Клиент", "body": "записывается", "attrs": {"type": "человек"}}]})
         project.tool_call(token, "finish", {"summary": "готово"})
         return TurnResult(session_id="s1", text="", cost=0.0)
 
