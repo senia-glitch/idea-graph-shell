@@ -17,7 +17,7 @@ function tabs() {
 async function show(next) {
   tab = next;
   document.querySelectorAll("main > .tab").forEach((el) => el.classList.toggle("on", el.id === "tab-" + next));
-  for (const id of ["zoomLabel", "fitBtn", "composeBtn"]) $(id).style.display = next === "work" ? "" : "none";
+  for (const id of ["zoomLabel", "fitBtn", "composeBtn", "exportBtn"]) $(id).style.display = next === "work" ? "" : "none";
   tabs();
   if (next === "settings") renderSettings();
   if (next === "welcome") renderWelcome();

@@ -1,7 +1,7 @@
 /* Граф справа: только наглядное отображение того, что сделано по шагам. Логикой не управляет, карточки создаются слева. */
 
 import {createCanvas} from "./canvas.js";
-import {$, S, act, api, esc} from "./core.js";
+import {$, S, act, api, esc, toast} from "./core.js";
 import {sequenceSvg, usecaseSvg} from "./diagrams.js";
 
 const COLORS = {"сфера": "#e8833a", "роль": "#5aa0ff", "сценарий": "#bb9af7", "проблема": "#ff6b6b", "вариант": "#e8c33a",
@@ -54,6 +54,10 @@ export function initGraph() {
     onEdgeSelect: () => {},
   });
   $("fitBtn").onclick = () => canvas.fit();
+  $("exportBtn").onclick = () => act(async () => {
+    const out = await api("/api/act", {action: "export_md"});
+    toast("Документация записана: " + out.path);
+  });
   $("composeBtn").onclick = () => { if (canvas.compose()) $("undoComposeBtn").style.display = ""; };
   $("undoComposeBtn").onclick = () => { canvas.undoCompose(); $("undoComposeBtn").style.display = "none"; };
 }
