@@ -1,6 +1,6 @@
 /* Запуск интерфейса: вкладки, выбор проекта, опрос состояния. */
 
-import {$, S, act, api, emit, esc, on} from "./core.js";
+import {$, S, act, api, emit, esc, on, toast} from "./core.js";
 import {initBank, renderBank} from "./bank.js";
 import {fitGraph, initGraph, loadGraph, resetGraphView} from "./graph.js";
 import {renderSettings} from "./settings.js";
@@ -80,6 +80,8 @@ async function openProject() {
   seen = S.project.version;
   S.step = firstOpenStep();
   await show("work");
+  const warnings = S.project.warnings || [];
+  if (warnings.length) toast("Внимание: " + warnings.join(" • "), 12000);
 }
 
 /* При открытии проекта показываем первый шаг, где ещё нет результата. */
@@ -95,17 +97,25 @@ let polling = false;
 async function poll() {
   if (polling || !S.project) return;
   polling = true;
+  let state, changed;
   try {
-    const state = await api("/api/state");
-    const changed = state.version !== seen || state.revision !== S.project.revision;
-    S.project = state;
+    state = await api("/api/state");
+    changed = state.version !== seen || state.revision !== S.project.revision;
+    S.project = { ...state, warnings: S.project.warnings };
     if (changed) { seen = state.version; await loadAll(); }
-    $("projectTitle").textContent = state.title;
     $("saveState").textContent = "";
+  } catch (error) {
+    // связи нет — только если оболочка не ответила; ответ с ошибкой — другое дело
+    $("saveState").textContent = error.code ? "ошибка оболочки: " + error.message : "нет связи с оболочкой";
+    polling = false;
+    return;
+  }
+  try {
+    $("projectTitle").textContent = state.title;
     if (tab === "work") renderSteps(changed);
     if (tab === "bank") renderBank(changed);
   } catch (error) {
-    $("saveState").textContent = "нет связи с оболочкой";
+    $("saveState").textContent = "ошибка отображения: " + (error.message || error);   // связь есть, сломалась отрисовка
   } finally {
     polling = false;
   }

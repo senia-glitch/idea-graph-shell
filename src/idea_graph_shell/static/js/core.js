@@ -37,12 +37,12 @@ export async function api(path, data) {
 }
 
 let toastTimer = 0;
-export function toast(text) {
+export function toast(text, ms = 4500) {
   const el = $("toast");
   el.textContent = text;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 4500);
+  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
 /* Действие с показом ошибки: всё, что нажимает человек, идёт через эту обёртку. */

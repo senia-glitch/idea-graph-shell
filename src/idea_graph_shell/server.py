@@ -96,7 +96,14 @@ class App:
         return {"agents": items}
 
     def boot(self) -> dict:
-        return {"project": self.project.state() if self.project else None, "steps": STEPS, "settings": self.settings.data,
+        project = None
+        if self.project:
+            project = self.project.state()
+            try:
+                project["warnings"] = self.project.warnings()
+            except Exception:  # noqa: BLE001 — предупреждения не должны мешать открытию проекта
+                project["warnings"] = []
+        return {"project": project, "steps": STEPS, "settings": self.settings.data,
                 "projects_root": str(self.projects_root()), "projects": self.projects()}
 
     def get(self, path: str, query: dict) -> dict:
