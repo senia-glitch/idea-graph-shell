@@ -54,11 +54,15 @@ export function initGraph() {
     onEdgeSelect: () => {},
   });
   $("fitBtn").onclick = () => canvas.fit();
-  $("exportBtn").onclick = () => act(async () => {          // сначала проверка согласованности графа с вопросами, потом файл
-    await api("/api/start", {kind: "export"});
-    toast("Проверяю согласованность графа перед выгрузкой…");
+  $("exportBtn").onclick = () => act(async () => {          // сразу файл по текущему графу, без проверки и без модели
+    const out = await api("/api/act", {action: "export_md"});
+    toast("Документация записана: " + out.path);
   });
-  $("exportAutoBtn").onclick = () => act(async () => {      // то же без вопросов: агент сам убирает вне границ и спорное
+  $("checkBtn").onclick = () => act(async () => {           // независимая проверка с вопросами по каждому разногласию, потом файл
+    await api("/api/start", {kind: "export"});
+    toast("Независимая проверка графа…");
+  });
+  $("exportAutoBtn").onclick = () => act(async () => {      // то же без вопросов: вне границ и спорное убирается само
     await api("/api/start", {kind: "export_auto"});
     toast("Автоматическая проверка и правка графа…");
   });

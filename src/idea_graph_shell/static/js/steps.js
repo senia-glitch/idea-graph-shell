@@ -67,7 +67,7 @@ function runBlock() {
 }
 
 function questionBlock(q) {
-  const picked = U.picked[q.id] || [];
+  const picked = U.picked[q.id] || (q.single && q.options.length === 1 ? [1] : []);        // единственный вариант выбран заранее
   const options = q.options.map((o, i) => `<button class="option${q.recommended.includes(i + 1) ? " rec" : ""}${picked.includes(i + 1) ? " picked" : ""}" data-pick="${i + 1}" data-q="${q.id}">
     <span class="num">${picked.includes(i + 1) ? "✓" : ""}</span><span class="otext"><b>${esc(o.title)}</b>
     ${q.recommended.includes(i + 1) ? '<span class="recmark">рекомендует помощник</span>' : ""}</span></button>`).join("");
@@ -306,7 +306,7 @@ export function initSteps() {
       return renderSteps(true);
     }
     if (d.answer) {
-      const text = (U.text["q" + d.q] || "").trim(), indexes = [...(U.picked[d.q] || [])].sort((a, b) => a - b);
+      const text = (U.text["q" + d.q] || "").trim(), indexes = [...(U.picked[d.q] || (run()?.question?.single && run().question.options.length === 1 ? [1] : []))].sort((a, b) => a - b);
       let choice;
       if (d.answer === "reject") choice = {type: "rejected", value: text};
       else {

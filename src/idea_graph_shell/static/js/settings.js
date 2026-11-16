@@ -52,6 +52,10 @@ export async function renderSettings() {
     <p class="hint">Сильная модель: сначала задаёт вопросы о границах системы (до 15), затем сама проходит всю цепочку — принимает и отклоняет предложения. Выберите самую сильную модель.</p>
     ${table(slotRow("autopilot", "Автопилот", "вопросы о границах и решения", st.autopilot), "Роль")}
 
+    <h2>Проверяющий</h2>
+    <p class="hint">Независимая модель: перед выгрузкой один раз читает граф и ищет разногласия. Выберите НЕ ту модель, что у помощника и автопилота: иначе проверка не независима.</p>
+    ${table(slotRow("checker", "Проверяющий", "проверка графа перед выгрузкой", st.checker || {agent: "claude", model: "sonnet", effort: ""}), "Роль")}
+
     <h2>Исследователи</h2>
     <p class="hint">Три агента независимо ищут конкурентов и анализируют их сайты. Нужен веб-поиск; дайте им разные модели.</p>
     ${table([0, 1, 2].map((i) => slotRow("researcher:" + i, "Исследователь " + (i + 1), "поиск и анализ в сети", st.researchers[i])).join(""), "Роль")}
@@ -78,6 +82,7 @@ export async function renderSettings() {
 function collect() {
   const st = S.boot.settings;
   const patch = {projects_root: $("projectsRoot") ? $("projectsRoot").value.trim() : (st.projects_root || ""), helper: {...st.helper}, autopilot: {...st.autopilot},
+    checker: {...(st.checker || {agent: "claude", model: "sonnet", effort: ""})},
     researchers: st.researchers.map((r) => ({...r}))};
   document.querySelectorAll("tr[data-slot]").forEach((row) => {
     const slot = {};
@@ -85,8 +90,9 @@ function collect() {
     const key = row.dataset.slot;
     if (key === "helper") patch.helper = slot;
     else if (key === "autopilot") patch.autopilot = slot;
+    else if (key === "checker") patch.checker = slot;
     else patch.researchers[Number(key.slice(11))] = slot;
   });
-  Object.assign(st, {helper: patch.helper, autopilot: patch.autopilot, researchers: patch.researchers});     // чтобы перерисовка показала новый выбор
+  Object.assign(st, {helper: patch.helper, autopilot: patch.autopilot, checker: patch.checker, researchers: patch.researchers});     // чтобы перерисовка показала новый выбор
   return patch;
 }
